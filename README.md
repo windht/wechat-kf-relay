@@ -250,12 +250,8 @@ ECHO_TEST_PREFIX=[echo]
 
 - push 到 `main` 或发起 PR 时，`.github/workflows/ci.yml` 会跑测试、构建、`pnpm pack --dry-run`
 - 真正发包时，更新 `package.json` 里的版本号，提交后打一个同版本 tag，例如 `v0.2.0`
-- push 这个 tag 后，`.github/workflows/publish.yml` 会再次校验包内容，然后发布到 npm
+- push 这个 tag 后，`.github/workflows/publish.yml` 会再次校验包内容，然后通过 npm trusted publishing 发布到 npm
 - 发布工作流会校验 tag 版本和 `package.json` 版本必须一致
-
-需要在 GitHub 仓库里配置：
-
-- `NPM_TOKEN`
 
 一个常见发布流程是：
 
@@ -268,7 +264,7 @@ git tag v0.2.0
 git push origin main --follow-tags
 ```
 
-不需要把 npm token 提供到聊天里，只需要放到 GitHub Actions 的 repo secret。
+完成首次发布并配置 trusted publisher 后，不再需要在 GitHub 仓库里保存 `NPM_TOKEN`。
 
 ## 本地验证命令
 
