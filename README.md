@@ -210,6 +210,27 @@ cp .env.example .env
 - `GET /api/state`
 - `WS /ws`
 
+## Caddy HTTPS 示例
+
+仓库根目录提供了一个可直接改的示例文件：[Caddyfile.example](./Caddyfile.example)。
+
+它会把 HTTPS 请求反向代理到本地 relay 默认端口 `3000`，并且 WebSocket `/ws` 也会一起透传，不需要额外配置。
+
+本地开发可以这样跑：
+
+```bash
+pnpm dev
+caddy trust
+caddy run --config ./Caddyfile.example
+```
+
+然后访问：
+
+- `https://relay.localhost/health`
+- `wss://relay.localhost/ws`
+
+如果你要给企业微信回调配置一个公网 HTTPS 地址，请把示例里的 `relay.example.com` 替换成真实域名，并使用那个公网域名的站点块。那种情况下不要用 `tls internal`，让 Caddy 自动申请公开可验证的证书即可。
+
 ## HTTP 示例
 
 发送文本消息：

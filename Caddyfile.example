@@ -1,0 +1,27 @@
+# Sample Caddy config for terminating HTTPS in front of the relay.
+#
+# Start the relay on PORT=3000 first, then run:
+#   caddy run --config ./Caddyfile.example
+#
+# For local development:
+#   1. Use https://relay.localhost
+#   2. Run `caddy trust` once so your machine trusts Caddy's local CA
+#   3. WebSocket clients should connect to wss://relay.localhost/ws
+#
+# For a public WeChat callback URL:
+#   1. Replace `relay.example.com` with your real domain
+#   2. Optionally add a global `email you@example.com` block for cert notices
+#   3. Caddy will obtain a public certificate automatically
+
+(relay_upstream) {
+	reverse_proxy 127.0.0.1:{$RELAY_PORT:3000}
+}
+
+relay.localhost {
+	tls internal
+	import relay_upstream
+}
+
+# relay.example.com {
+# 	import relay_upstream
+# }
