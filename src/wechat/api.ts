@@ -18,6 +18,16 @@ interface WechatApiConfig {
   secret: string;
 }
 
+export interface RelayApiClient {
+  syncMessages(input: {
+    cursor?: string;
+    token?: string;
+    limit?: number;
+    voiceFormat?: 0 | 1;
+  }): Promise<WechatSyncResponse>;
+  sendTextMessage(input: SendTextInput): Promise<WechatSendResponse>;
+}
+
 interface CachedToken {
   value: string;
   expiresAt: number;
@@ -43,7 +53,7 @@ export function buildTextReplyPayload(input: SendTextInput) {
   };
 }
 
-export class WechatKfApiClient {
+export class WechatKfApiClient implements RelayApiClient {
   private cachedToken: CachedToken | undefined;
 
   constructor(

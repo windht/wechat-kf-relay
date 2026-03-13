@@ -1,12 +1,12 @@
-import type { FileRelayStateStore } from "./state-store.js";
 import type { Logger } from "../logging/logger.js";
+import type { RelayStateStore } from "./state-store.js";
 import type {
   NormalizedWechatMessage,
   SendTextInput,
   WechatCallbackEvent,
   WechatSyncMessage,
 } from "../wechat/types.js";
-import type { WechatKfApiClient } from "../wechat/api.js";
+import type { RelayApiClient } from "../wechat/api.js";
 
 export type RelayServerEvent =
   | {
@@ -39,8 +39,8 @@ export class RelayService {
 
   constructor(
     private readonly deps: {
-      apiClient: WechatKfApiClient;
-      stateStore: FileRelayStateStore;
+      apiClient: RelayApiClient;
+      stateStore: RelayStateStore;
       broadcast: (event: RelayServerEvent) => void;
       logger: Logger;
       echoTest: {

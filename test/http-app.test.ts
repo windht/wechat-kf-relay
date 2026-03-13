@@ -7,37 +7,8 @@ import { noopLogger } from "../src/logging/logger.js";
 describe("createApp", () => {
   it("returns ok from the health endpoint", async () => {
     const app = createApp({
-      config: {
-        host: "127.0.0.1",
-        port: 3000,
-        log: {
-          level: "info",
-          file: ".data/test-relay.log",
-        },
-        echoTest: {
-          enabled: false,
-          prefix: "",
-        },
-        wsPath: "/ws",
-        wechatCallbackPath: "/wechat/callback",
-        stateFile: ".data/test-state.json",
-        wechatApiBaseUrl: "https://qyapi.weixin.qq.com",
-        wechat: {
-          corpId: "ww123",
-          secret: "secret",
-          token: "Token123",
-          encodingAesKey: "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-        },
-      },
-      relayService: {
-        handleCallbackEvent: vi.fn(),
-        sendTextMessage: vi.fn(),
-        syncNow: vi.fn(),
-        getSnapshot: vi.fn().mockReturnValue({
-          nextCursor: undefined,
-          recentMessages: [],
-        }),
-      } as never,
+      config: createTestConfig(),
+      relayService: createRelayServiceStub(),
       logger: noopLogger,
     });
 
@@ -51,31 +22,8 @@ describe("createApp", () => {
 
   it("returns snake_case state snapshot and sync response", async () => {
     const app = createApp({
-      config: {
-        host: "127.0.0.1",
-        port: 3000,
-        log: {
-          level: "info",
-          file: ".data/test-relay.log",
-        },
-        echoTest: {
-          enabled: false,
-          prefix: "",
-        },
-        wsPath: "/ws",
-        wechatCallbackPath: "/wechat/callback",
-        stateFile: ".data/test-state.json",
-        wechatApiBaseUrl: "https://qyapi.weixin.qq.com",
-        wechat: {
-          corpId: "ww123",
-          secret: "secret",
-          token: "Token123",
-          encodingAesKey: "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-        },
-      },
-      relayService: {
-        handleCallbackEvent: vi.fn(),
-        sendTextMessage: vi.fn(),
+      config: createTestConfig(),
+      relayService: createRelayServiceStub({
         syncNow: vi.fn().mockResolvedValue({
           syncedCount: 2,
           nextCursor: "cursor-2",
@@ -105,13 +53,16 @@ describe("createApp", () => {
             },
           ],
         }),
-      } as never,
+      }),
       logger: noopLogger,
     });
 
-    const stateResponse = await request(app).get("/api/state");
+    const stateResponse = await request(app)
+      .get("/api/state")
+      .set("x-wechat-relay-key", "relay-secret");
     const syncResponse = await request(app)
       .post("/api/wechat/sync")
+      .set("x-wechat-relay-key", "relay-secret")
       .send({});
 
     expect(stateResponse.status).toBe(200);
@@ -146,4 +97,73 @@ describe("createApp", () => {
       next_cursor: "cursor-2",
     });
   });
+
+  it("rejects management APIs without the configured server key", async () => {
+    const app = createApp({
+      config: createTestConfig(),
+      relayService: createRelayServiceStub(),
+      logger: noopLogger,
+    });
+
+    const response = await request(app).get("/api/state");
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({
+      error: "Unauthorized",
+    });
+  });
+
+  it("leaves the health check open even when the server key is enabled", async () => {
+    const app = createApp({
+      config: createTestConfig(),
+      relayService: createRelayServiceStub(),
+      logger: noopLogger,
+    });
+
+    const response = await request(app).get("/health");
+
+    expect(response.status).toBe(200);
+  });
 });
+
+function createTestConfig() {
+  return {
+    host: "127.0.0.1",
+    port: 3000,
+    log: {
+      level: "info" as const,
+      file: ".data/test-relay.log",
+    },
+    echoTest: {
+      enabled: false,
+      prefix: "",
+    },
+    wsPath: "/ws",
+    wechatCallbackPath: "/wechat/callback",
+    stateFile: ".data/test-state.json",
+    wechatApiBaseUrl: "https://qyapi.weixin.qq.com",
+    serverKey: "relay-secret",
+    wechat: {
+      corpId: "ww123",
+      secret: "secret",
+      token: "Token123",
+      encodingAesKey: "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+    },
+  };
+}
+
+function createRelayServiceStub(overrides: Record<string, unknown> = {}) {
+  return {
+    handleCallbackEvent: vi.fn(),
+    sendTextMessage: vi.fn(),
+    syncNow: vi.fn().mockResolvedValue({
+      syncedCount: 0,
+      nextCursor: undefined,
+    }),
+    getSnapshot: vi.fn().mockReturnValue({
+      nextCursor: undefined,
+      recentMessages: [],
+    }),
+    ...overrides,
+  } as never;
+}

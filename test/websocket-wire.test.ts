@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createCommand,
+  parseRelayCommand,
+  parseRelayServerMessage,
   toWireMessage,
   toWireRelayEvent,
   toWireSnapshot,
-} from "../src/websocket/ws-server.js";
+} from "../src/shared/protocol.js";
 
 describe("websocket wire protocol", () => {
   it("formats inbound messages as snake_case", () => {
@@ -88,6 +91,54 @@ describe("websocket wire protocol", () => {
       message: {
         synced_count: 1,
         next_cursor: "cursor-1",
+      },
+    });
+  });
+
+  it("normalizes supported websocket commands", () => {
+    expect(
+      parseRelayCommand({
+        type: "send_text",
+        message: {
+          external_userid: "wm-1",
+          open_kfid: "wk-1",
+          content: "hello",
+        },
+      }),
+    ).toEqual(
+      createCommand("send_text", {
+        external_userid: "wm-1",
+        open_kfid: "wk-1",
+        content: "hello",
+      }),
+    );
+
+    expect(
+      parseRelayCommand({
+        type: "sync_now",
+        token: "sync-token",
+      }),
+    ).toEqual(
+      createCommand("sync_now", {
+        token: "sync-token",
+      }),
+    );
+  });
+
+  it("parses authenticated websocket envelopes", () => {
+    expect(
+      parseRelayServerMessage({
+        type: "authenticated",
+        message: {
+          client_id: "client-1",
+          ws_path: "/ws",
+        },
+      }),
+    ).toEqual({
+      type: "authenticated",
+      message: {
+        client_id: "client-1",
+        ws_path: "/ws",
       },
     });
   });

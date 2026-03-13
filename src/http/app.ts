@@ -1,16 +1,14 @@
 import { randomUUID } from "node:crypto";
 
-import express from "express";
-import { z } from "zod";
+import express, { type Express } from "express";
+import { ZodError, z } from "zod";
 
 import type { AppConfig } from "../config.js";
 import { serializeError } from "../logging/logger.js";
 import type { RelayService } from "../relay/relay-service.js";
-import {
-  decryptCallbackMessage,
-  verifyCallbackUrl,
-} from "../wechat/crypto.js";
-import type { NormalizedWechatMessage } from "../wechat/types.js";
+import { readServerKeyFromHttpRequest, isServerKeyAuthorized } from "../shared/auth.js";
+import { toWireSnapshot } from "../shared/protocol.js";
+import { decryptCallbackMessage, verifyCallbackUrl } from "../wechat/crypto.js";
 import { parseCallbackEvent } from "../wechat/xml.js";
 
 const callbackQuerySchema = z.object({
@@ -53,8 +51,10 @@ export function createApp(input: {
   config: AppConfig;
   relayService: RelayService;
   logger: import("../logging/logger.js").Logger;
-}) {
+  ready?: Promise<void>;
+}): Express {
   const app = express();
+  const ready = input.ready ?? Promise.resolve();
 
   app.use(express.json({ limit: "1mb" }));
   app.use((req, res, next) => {
@@ -79,6 +79,15 @@ export function createApp(input: {
     });
 
     next();
+  });
+
+  app.use(async (_req, _res, next) => {
+    try {
+      await ready;
+      next();
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.get("/health", (_req, res) => {
@@ -168,6 +177,28 @@ export function createApp(input: {
     },
   );
 
+  app.use("/api", (req, res, next) => {
+    const serverKey = readServerKeyFromHttpRequest({
+      headers: req.headers,
+      query: req.query as Record<string, unknown>,
+      body: req.body,
+    });
+
+    if (isServerKeyAuthorized(input.config.serverKey, serverKey)) {
+      next();
+      return;
+    }
+
+    input.logger.warn("Rejected unauthorized API request", {
+      requestId: res.locals.requestId as string | undefined,
+      method: req.method,
+      path: req.path,
+    });
+    res.status(401).json({
+      error: "Unauthorized",
+    });
+  });
+
   app.post("/api/messages/text", async (req, res, next) => {
     try {
       const body = sendTextRequestSchema.parse(req.body);
@@ -216,7 +247,7 @@ export function createApp(input: {
   });
 
   app.get("/api/state", (_req, res) => {
-    res.json(toWireStateSnapshot(input.relayService.getSnapshot()));
+    res.json(toWireSnapshot(input.relayService.getSnapshot()));
   });
 
   app.use(
@@ -226,7 +257,13 @@ export function createApp(input: {
       res: express.Response,
       _next: express.NextFunction,
     ) => {
-      const message = error instanceof Error ? error.message : "Unknown server error";
+      const statusCode = error instanceof ZodError ? 400 : 500;
+      const message =
+        error instanceof ZodError
+          ? error.issues.map((issue) => issue.message).join(", ")
+          : error instanceof Error
+            ? error.message
+            : "Unknown server error";
       input.logger.error("HTTP request failed", {
         requestId: res.locals.requestId as string | undefined,
         method: req.method,
@@ -234,36 +271,11 @@ export function createApp(input: {
         error: serializeError(error),
       });
 
-      res.status(500).json({
+      res.status(statusCode).json({
         error: message,
       });
     },
   );
 
   return app;
-}
-
-function toWireStateMessage(message: NormalizedWechatMessage) {
-  return {
-    message_id: message.messageId,
-    open_kfid: message.openKfId,
-    external_userid: message.externalUserId,
-    send_time: message.sendTime,
-    origin: message.origin,
-    msgtype: message.msgType,
-    text: message.text
-      ? {
-          content: message.text.content,
-          menu_id: message.text.menuId,
-        }
-      : undefined,
-    raw: message.raw,
-  };
-}
-
-function toWireStateSnapshot(snapshot: ReturnType<RelayService["getSnapshot"]>) {
-  return {
-    next_cursor: snapshot.nextCursor,
-    recent_messages: snapshot.recentMessages.map(toWireStateMessage),
-  };
 }

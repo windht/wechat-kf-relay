@@ -8,7 +8,13 @@ export interface RelayState {
   updatedAt?: string;
 }
 
-export class FileRelayStateStore {
+export interface RelayStateStore {
+  init?(): Promise<void>;
+  getState(): RelayState;
+  setNextCursor(nextCursor: string | undefined): Promise<void>;
+}
+
+export class FileRelayStateStore implements RelayStateStore {
   private state: RelayState = {};
 
   constructor(

@@ -1,58 +1,131 @@
-# 微信客服 Relay
+# wechat-kf-relay
 
-这是一个本地运行的 Node.js 转发服务，用来把微信客服（WeChat KF）的回调、拉消息、发消息能力，桥接到一个简单的 HTTP + WebSocket 接口上，方便你本地联调、接机器人、接业务系统。
+`wechat-kf-relay` 是一个把微信客服回调、拉消息、发消息能力桥接到本地 HTTP + WebSocket 的 Node.js/TypeScript 包。
 
-本项目现在也用在 [TIA Studio](https://github.com/ZhuxinAI/TIA-Studio) 中。
+它现在同时支持两种使用方式：
 
-## 这个项目现在能做什么
+- 作为独立服务直接启动
+- 作为可复用 npm package 嵌入现有 Express 服务
+
+项目当前也用于 [TIA Studio](https://github.com/ZhuxinAI/TIA-Studio)。
+
+## 功能概览
 
 - 校验并解密微信客服回调
-- 收到回调后，调用 `kf/sync_msg` 主动拉取真实消息
-- 通过 `kf/send_msg` 回发纯文本消息
-- 通过 WebSocket 把收到的消息广播给下游客户端
-- 支持一个可选的 `echo test` 模式，收到文本后原样回给用户
-- 输出结构化日志到控制台和本地日志文件
+- 收到回调后调用 `kf/sync_msg` 拉取真实消息
+- 通过 `kf/send_msg` 发送文本消息
+- 通过 WebSocket 向下游广播微信消息和状态事件
+- 提供类型安全的 Node.js 客户端 `wechat-kf-relay/client`
+- 支持可选 `echo test` 模式
+- 支持 `server_key` 作为本地管理接口和 WebSocket 的访问门禁
 
-## 相关官方文档
-
-- 回调配置：[开发指引 / 回调配置](https://kf.weixin.qq.com/api/doc/path/93304#%E5%9B%9E%E8%B0%83%E9%85%8D%E7%BD%AE)
-- 接收消息和事件：[接收消息和事件](https://kf.weixin.qq.com/api/doc/path/94745)
-- 发送消息：[发送消息](https://kf.weixin.qq.com/api/doc/path/94744)
-
-## 环境要求
-
-- Node.js 22+
-- pnpm
-- 已开通并启用 API 的微信客服账号
-- 以下微信客服配置项：
-  - `WECHAT_CORP_ID`
-  - `WECHAT_SECRET`
-  - `WECHAT_TOKEN`
-  - `WECHAT_ENCODING_AES_KEY`
-
-## 快速开始
-
-1. 复制环境变量模板
+## 安装
 
 ```bash
-cp .env.example .env
+pnpm add wechat-kf-relay
 ```
 
-2. 填写 `.env`
-
-3. 安装依赖
+也可以在本仓库本地开发：
 
 ```bash
 pnpm install
-```
-
-4. 启动开发服务
-
-```bash
 pnpm dev
 ```
 
-## 关键环境变量
+## Server Package
+
+### 独立启动
+
+```ts
+import WechatKfRelay from "wechat-kf-relay/server";
+
+const relay = new WechatKfRelay({
+  corpId: process.env.WECHAT_CORP_ID,
+  secret: process.env.WECHAT_SECRET,
+  token: process.env.WECHAT_TOKEN,
+  encodingAesKey: process.env.WECHAT_ENCODING_AES_KEY,
+  serverKey: process.env.SERVER_KEY,
+});
+
+const serverInfo = await relay.start();
+
+console.log(serverInfo.httpBaseUrl);
+console.log(serverInfo.wsUrl);
+```
+
+如果不显式传入这四个微信配置项，`WechatKfRelay` 会自动从环境变量读取。
+
+### 嵌入现有 Express
+
+`handler()` 可以把 HTTP 路由挂到现有 Express 应用里：
+
+```ts
+import http from "node:http";
+import express from "express";
+import WechatKfRelay from "wechat-kf-relay/server";
+
+const relay = new WechatKfRelay({
+  corpId: process.env.WECHAT_CORP_ID,
+  secret: process.env.WECHAT_SECRET,
+  token: process.env.WECHAT_TOKEN,
+  encodingAesKey: process.env.WECHAT_ENCODING_AES_KEY,
+  serverKey: process.env.SERVER_KEY,
+  wsPath: "/relay/ws",
+});
+
+const app = express();
+app.use("/relay", relay.handler());
+
+const server = http.createServer(app);
+relay.attach(server);
+
+server.listen(3000);
+```
+
+说明：
+
+- `app.use("/relay", relay.handler())` 会把回调和 `/api/*` 路由挂到 `/relay` 前缀下
+- WebSocket 升级发生在 `http.Server` 层，所以如果你要在嵌入模式里继续使用 WebSocket，除了 `handler()` 之外还要调用 `relay.attach(server)`
+- 如果只需要 HTTP 接口，单独挂 `handler()` 也可以
+
+## Client Package
+
+```ts
+import WechatKfRelayClient from "wechat-kf-relay/client";
+
+const client = new WechatKfRelayClient({
+  url: "ws://127.0.0.1:3000/ws",
+  key: process.env.SERVER_KEY,
+});
+
+client.on("authenticated", (payload) => {
+  console.log("authenticated", payload.client_id);
+});
+
+client.on("wechat.message", (message) => {
+  console.log(message.text?.content);
+});
+
+client.on("wechat.outbound.sent", (event) => {
+  console.log(event.result.msgid);
+});
+
+client.connect();
+client.syncNow();
+```
+
+客户端会把 `key` 自动带到 WebSocket 握手里，并按类型发出这些常用事件：
+
+- `authenticated`
+- `snapshot`
+- `wechat.message`
+- `wechat.sync.complete`
+- `wechat.outbound.sent`
+- `send_text.result`
+- `relay.error`
+- `socket.error`
+
+## 环境变量
 
 ```env
 PORT=3000
@@ -73,119 +146,46 @@ WECHAT_CORP_ID=wwxxxxxxxxxxxxxxxx
 WECHAT_SECRET=your_wechat_kf_secret
 WECHAT_TOKEN=YourCallbackToken123
 WECHAT_ENCODING_AES_KEY=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG
+
+SERVER_KEY=replace-me
 ```
 
-### 字段说明
-
-- `WECHAT_CORP_ID`
-  微信客服企业 ID，由平台提供
-- `WECHAT_SECRET`
-  微信客服的 Secret，由平台提供，用来换取 `access_token`
-- `WECHAT_TOKEN`
-  你在微信客服后台回调配置里自定义的 Token
-- `WECHAT_ENCODING_AES_KEY`
-  你在微信客服后台回调配置里自定义的 43 位 EncodingAESKey
-- `ECHO_TEST_ENABLED`
-  是否开启“收到文本就原样回发”的测试模式
-- `ECHO_TEST_PREFIX`
-  Echo 模式下的前缀，例如 `[echo] `
-
-## 日志
-
-默认日志同时输出到：
-
-- 控制台
-- `.data/logs/relay.log`
-
-查看日志：
+可从模板开始：
 
 ```bash
-tail -f .data/logs/relay.log
+cp .env.example .env
 ```
 
-日志里会看到这些关键流转：
+## `server_key` 门禁
 
-- 服务启动
-- HTTP 请求开始/结束
-- 回调解密成功
-- `kf/sync_msg` 拉取批次
-- 收到的微信消息
-- WebSocket 客户端连接/断开/命令
-- `kf/send_msg` 发消息结果
+设置 `SERVER_KEY` 后：
 
-## Echo 测试模式
+- `GET /health` 不受影响
+- 微信回调地址不受影响，因为微信侧不会携带你的本地密钥
+- 所有 `/api/*` 路由需要带上 `x-wechat-relay-key` 头，或 `server_key` 查询参数/请求体字段
+- WebSocket 握手需要带上同一个 key
+- `WechatKfRelayClient` 的 `key` 参数会自动处理这件事
 
-如果你只是想快速验证“收到消息后能不能回发成功”，可以打开：
+## 默认路由
 
-```env
-ECHO_TEST_ENABLED=true
-```
+独立启动时默认暴露这些路径：
 
-可选前缀：
+- `GET /health`
+- `GET /wechat/callback`
+- `POST /wechat/callback`
+- `POST /api/messages/text`
+- `POST /api/wechat/sync`
+- `GET /api/state`
+- `WS /ws`
 
-```env
-ECHO_TEST_PREFIX=[echo] 
-```
+## HTTP 示例
 
-开启后：
-
-- 用户给微信客服发文本消息
-- Relay 拉到该消息
-- Relay 会自动调用 `kf/send_msg` 把文本回发给该用户
-
-建议：
-
-- 只在联调时开启
-- 验证完成后再关掉
-- 它依然受微信客服原本的 48 小时窗口和发送规则约束
-
-## HTTP 接口
-
-### `GET /health`
-
-健康检查。
-
-### `GET /wechat/callback`
-
-微信客服回调地址校验接口。
-
-用途：
-
-- 在微信客服后台保存回调 URL 时，微信侧会请求这个地址
-- 服务会校验签名并返回解密后的 `echostr`
-
-### `POST /wechat/callback`
-
-微信客服回调入口。
-
-流程：
-
-1. 接收加密 XML
-2. 校验签名
-3. 解密回调体
-4. 解析出回调里的 `Token`
-5. 调用 `kf/sync_msg` 拉取真实消息
-6. 广播到 WebSocket 客户端
-
-### `POST /api/messages/text`
-
-主动发送文本消息。
-
-推荐请求体：
-
-```json
-{
-  "external_userid": "wmxxxxxxxx",
-  "open_kfid": "wkxxxxxxxx",
-  "content": "hello from relay"
-}
-```
-
-示例：
+发送文本消息：
 
 ```bash
 curl -X POST http://127.0.0.1:3000/api/messages/text \
   -H 'content-type: application/json' \
+  -H 'x-wechat-relay-key: replace-me' \
   -d '{
     "external_userid": "wmxxxxxxxx",
     "open_kfid": "wkxxxxxxxx",
@@ -193,232 +193,82 @@ curl -X POST http://127.0.0.1:3000/api/messages/text \
   }'
 ```
 
-### `POST /api/wechat/sync`
-
-手动触发一次 `kf/sync_msg` 拉取。
-
-示例：
+手动触发一次同步：
 
 ```bash
 curl -X POST http://127.0.0.1:3000/api/wechat/sync \
   -H 'content-type: application/json' \
+  -H 'x-wechat-relay-key: replace-me' \
   -d '{}'
 ```
 
-### `GET /api/state`
-
-返回当前内存快照和最近消息，主要用于调试。
-
-说明：
-
-- 这是一个调试接口
-- 返回结构不建议作为稳定业务协议依赖
-
 ## WebSocket 协议
 
-默认路径：
-
-```txt
-/ws
-```
-
-### 设计约定
-
-WebSocket 的对外协议统一采用：
-
-```json
-{
-  "type": "xxx",
-  "message": {}
-}
-```
-
-说明：
-
-- `type` 表示消息类型
-- `message` 承载具体内容
-- 对外字段统一使用 `snake_case`
-
-### 服务端推送示例
-
-收到微信文本消息后，服务端会推：
+服务端推送统一是：
 
 ```json
 {
   "type": "wechat.message",
-  "message": {
-    "message_id": "from_msgid_xxx",
-    "open_kfid": "wkxxxx",
-    "external_userid": "wmxxxx",
-    "send_time": 1710000000,
-    "origin": 3,
-    "msgtype": "text",
-    "text": {
-      "content": "你好",
-      "menu_id": "menu_1"
-    }
-  }
-}
-```
-
-连接建立后，服务端会先推：
-
-```json
-{
-  "type": "connected",
-  "message": {
-    "client_id": "uuid",
-    "ws_path": "/ws"
-  }
-}
-```
-
-然后推一个快照：
-
-```json
-{
-  "type": "snapshot",
-  "message": {
-    "next_cursor": "cursor_xxx",
-    "recent_messages": []
-  }
-}
-```
-
-### 客户端命令
-
-#### `ping`
-
-```json
-{
-  "type": "ping",
   "message": {}
 }
 ```
 
-#### `get_snapshot`
+对外字段统一使用 `snake_case`。
 
-```json
-{
-  "type": "get_snapshot",
-  "message": {}
-}
+常见服务端事件：
+
+- `authenticated`
+- `snapshot`
+- `pong`
+- `wechat.message`
+- `wechat.sync.complete`
+- `wechat.outbound.sent`
+- `wechat.callback`
+- `relay.error`
+
+常见客户端命令：
+
+- `ping`
+- `get_snapshot`
+- `sync_now`
+- `send_text`
+
+## Echo 测试模式
+
+如果只想快速验证“收到消息后能否自动回发”，可以开启：
+
+```env
+ECHO_TEST_ENABLED=true
+ECHO_TEST_PREFIX=[echo] 
 ```
 
-#### `sync_now`
+开启后收到文本消息时，relay 会自动调用 `kf/send_msg` 原样回发。
 
-```json
-{
-  "type": "sync_now",
-  "message": {
-    "token": "optional_sync_token"
-  }
-}
-```
+## 发布到 npm
 
-#### `send_text`
+仓库已经接入 Changesets + GitHub Actions 的 release workflow：
 
-推荐格式：
+- 开发时执行 `pnpm changeset` 生成版本变更说明
+- push 到 `main` 后，`.github/workflows/release.yml` 会跑测试、构建、`pnpm pack --dry-run`
+- 如果存在未发布的 changeset，workflow 会自动创建或更新 release PR
+- release PR 合并后，workflow 会自动发布到 npm
 
-```json
-{
-  "type": "send_text",
-  "message": {
-    "external_userid": "wmxxxx",
-    "open_kfid": "wkxxxx",
-    "content": "hello from websocket",
-    "msgid": "optional_msgid"
-  }
-}
-```
+需要在 GitHub 仓库里配置：
 
-兼容旧格式：
+- `NPM_TOKEN`
 
-```json
-{
-  "type": "send_text",
-  "external_userid": "wmxxxx",
-  "open_kfid": "wkxxxx",
-  "content": "hello from websocket"
-}
-```
+这套流程是 release-workflow 驱动，不需要手工维护发布 tag。
 
-### 服务端响应示例
-
-`send_text` 成功后：
-
-```json
-{
-  "type": "send_text.result",
-  "message": {
-    "errcode": 0,
-    "errmsg": "ok",
-    "msgid": "MSG_ID"
-  }
-}
-```
-
-`sync_now` 成功后：
-
-```json
-{
-  "type": "sync_now.result",
-  "message": {
-    "synced_count": 1,
-    "next_cursor": "cursor_xxx"
-  }
-}
-```
-
-失败时：
-
-```json
-{
-  "type": "error",
-  "message": {
-    "error": "Unsupported websocket command payload"
-  }
-}
-```
-
-## Cloudflare Tunnel
-
-如果已经安装 `cloudflared`：
+## 本地验证命令
 
 ```bash
-./scripts/tunnel.sh 3000
+pnpm test
+pnpm build
+pnpm pack --dry-run
 ```
 
-如果还没安装（macOS）：
+## 相关官方文档
 
-```bash
-brew install cloudflared
-```
-
-拿到公网地址后，把它填到微信客服后台的回调 URL，例如：
-
-```txt
-https://your-public-domain.example.com/wechat/callback
-```
-
-## 推荐联调流程
-
-1. 配好 `.env`
-2. 启动 relay
-3. 启动 `cloudflared`
-4. 把公网 callback URL 配到微信客服后台
-5. `tail -f .data/logs/relay.log`
-6. 用微信给客服发一条消息
-7. 观察：
-   - 日志里是否出现回调解密成功
-   - 是否调用了 `kf/sync_msg`
-   - WebSocket 客户端是否收到 `wechat.message`
-   - 如果开了 `ECHO_TEST_ENABLED=true`，是否成功回发
-
-## 一些实现说明
-
-- 微信客服回调本身不是完整消息体，而是一个触发器
-- 真正的消息内容要再通过 `kf/sync_msg` 拉取
-- 回调里带的 `Token` 建议拿来做同步拉取，它有 10 分钟有效期
-- 发文本消息时，底层最终调用的是微信客服的 `kf/send_msg`
-- 当前项目主要聚焦“文本收发 + websocket 转发 + 联调观察性”
+- 回调配置：[开发指引 / 回调配置](https://kf.weixin.qq.com/api/doc/path/93304#%E5%9B%9E%E8%B0%83%E9%85%8D%E7%BD%AE)
+- 接收消息和事件：[接收消息和事件](https://kf.weixin.qq.com/api/doc/path/94745)
+- 发送消息：[发送消息](https://kf.weixin.qq.com/api/doc/path/94744)
