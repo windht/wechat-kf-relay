@@ -108,6 +108,11 @@ function createRelay(overrides: Partial<ConstructorParameters<typeof WechatKfRel
         errmsg: "ok",
         msgid: "sent-1",
       }),
+      sendMessageOnEvent: vi.fn().mockResolvedValue({
+        errcode: 0,
+        errmsg: "ok",
+        msgid: "event-sent-1",
+      }),
     },
     ...overrides,
   });

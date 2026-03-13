@@ -16,6 +16,8 @@ export type {
   RelayClientCommand,
   RelayClientCommandMap,
   RelayErrorMessage,
+  RelayMessageOnEventPayload,
+  RelayMessageOnEventResultMessage,
   RelayOutboundSentMessage,
   RelayPongMessage,
   RelaySendTextPayload,
@@ -23,6 +25,7 @@ export type {
   RelayServerMessage,
   RelayServerMessageMap,
   RelaySyncNowResultMessage,
+  RelayWireWechatEnterSessionEvent,
   RelayWireSnapshot,
   RelayWireWechatMessage,
 } from "./shared/protocol.js";

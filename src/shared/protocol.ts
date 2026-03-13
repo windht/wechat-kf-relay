@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import type { RelayServerEvent } from "../relay/relay-service.js";
-import type { NormalizedWechatMessage } from "../wechat/types.js";
+import type {
+  NormalizedWechatEnterSessionEvent,
+  NormalizedWechatMessage,
+} from "../wechat/types.js";
 
 export interface RelayWireWechatMessage {
   message_id: string;
@@ -20,6 +23,21 @@ export interface RelayWireWechatMessage {
 export interface RelayWireSnapshot {
   next_cursor?: string;
   recent_messages: RelayWireWechatMessage[];
+}
+
+export interface RelayWireWechatEnterSessionEvent {
+  event_type: "enter_session";
+  open_kfid: string;
+  external_userid: string;
+  scene?: string;
+  scene_param?: string;
+  welcome_code?: string;
+  wechat_channels?: {
+    nickname?: string;
+    shop_nickname?: string;
+    scene?: number;
+  };
+  raw: Record<string, unknown>;
 }
 
 export interface RelayAuthenticatedMessage {
@@ -45,6 +63,18 @@ export interface RelaySendTextPayload {
 }
 
 export interface RelaySendTextResultMessage {
+  errcode: number;
+  errmsg: string;
+  msgid?: string;
+}
+
+export interface RelayMessageOnEventPayload {
+  code: string;
+  content: string;
+  msgid?: string;
+}
+
+export interface RelayMessageOnEventResultMessage {
   errcode: number;
   errmsg: string;
   msgid?: string;
@@ -76,7 +106,9 @@ export interface RelayServerMessageMap {
   pong: RelayPongMessage;
   "sync_now.result": RelaySyncNowResultMessage;
   "send_text.result": RelaySendTextResultMessage;
+  "message_on_event.result": RelayMessageOnEventResultMessage;
   "wechat.message": RelayWireWechatMessage;
+  "wechat.enter_session": RelayWireWechatEnterSessionEvent;
   "wechat.sync.complete": RelaySyncNowResultMessage;
   "wechat.outbound.sent": RelayOutboundSentMessage;
   "wechat.callback": RelayCallbackMessage;
@@ -102,6 +134,7 @@ export interface RelayClientCommandMap {
     token?: string;
   };
   send_text: RelaySendTextPayload;
+  message_on_event: RelayMessageOnEventPayload;
 }
 
 export type RelayClientCommand = {
@@ -137,6 +170,23 @@ const snapshotSchema: z.ZodType<RelayWireSnapshot> = z.object({
   recent_messages: z.array(wireMessageSchema),
 });
 
+const enterSessionEventSchema: z.ZodType<RelayWireWechatEnterSessionEvent> = z.object({
+  event_type: z.literal("enter_session"),
+  open_kfid: z.string(),
+  external_userid: z.string(),
+  scene: z.string().optional(),
+  scene_param: z.string().optional(),
+  welcome_code: z.string().optional(),
+  wechat_channels: z
+    .object({
+      nickname: z.string().optional(),
+      shop_nickname: z.string().optional(),
+      scene: z.number().optional(),
+    })
+    .optional(),
+  raw: z.record(z.string(), z.unknown()),
+});
+
 const authenticatedSchema: z.ZodType<RelayAuthenticatedMessage> = z.object({
   client_id: z.string(),
   ws_path: z.string(),
@@ -170,6 +220,18 @@ const sendTextPayloadSchema: z.ZodType<RelaySendTextPayload> = z
   });
 
 const sendTextResultSchema: z.ZodType<RelaySendTextResultMessage> = z.object({
+  errcode: z.number(),
+  errmsg: z.string(),
+  msgid: z.string().optional(),
+});
+
+const messageOnEventPayloadSchema: z.ZodType<RelayMessageOnEventPayload> = z.object({
+  code: z.string().min(1),
+  content: z.string().min(1),
+  msgid: z.string().optional(),
+});
+
+const messageOnEventResultSchema: z.ZodType<RelayMessageOnEventResultMessage> = z.object({
   errcode: z.number(),
   errmsg: z.string(),
   msgid: z.string().optional(),
@@ -217,8 +279,16 @@ const serverMessageSchema: z.ZodType<RelayServerMessage> = z.discriminatedUnion(
     message: sendTextResultSchema,
   }),
   z.object({
+    type: z.literal("message_on_event.result"),
+    message: messageOnEventResultSchema,
+  }),
+  z.object({
     type: z.literal("wechat.message"),
     message: wireMessageSchema,
+  }),
+  z.object({
+    type: z.literal("wechat.enter_session"),
+    message: enterSessionEventSchema,
   }),
   z.object({
     type: z.literal("wechat.sync.complete"),
@@ -275,6 +345,20 @@ const sendTextCommandSchema = z.object({
     .optional(),
 });
 
+const messageOnEventCommandSchema = z.object({
+  type: z.literal("message_on_event"),
+  code: z.string().min(1).optional(),
+  content: z.string().min(1).optional(),
+  msgid: z.string().optional(),
+  message: z
+    .object({
+      code: z.string().min(1).optional(),
+      content: z.string().min(1).optional(),
+      msgid: z.string().optional(),
+    })
+    .optional(),
+});
+
 export function envelope<Type extends keyof RelayServerMessageMap>(
   type: Type,
   message: RelayServerMessageMap[Type],
@@ -303,6 +387,27 @@ export function toWireMessage(message: NormalizedWechatMessage): RelayWireWechat
   };
 }
 
+export function toWireEnterSessionEvent(
+  event: NormalizedWechatEnterSessionEvent,
+): RelayWireWechatEnterSessionEvent {
+  return {
+    event_type: event.eventType,
+    open_kfid: event.openKfId,
+    external_userid: event.externalUserId,
+    scene: event.scene,
+    scene_param: event.sceneParam,
+    welcome_code: event.welcomeCode,
+    wechat_channels: event.wechatChannels
+      ? {
+          nickname: event.wechatChannels.nickname,
+          shop_nickname: event.wechatChannels.shopNickname,
+          scene: event.wechatChannels.scene,
+        }
+      : undefined,
+    raw: event.raw as Record<string, unknown>,
+  };
+}
+
 export function toWireSnapshot(snapshot: {
   nextCursor?: string;
   recentMessages: NormalizedWechatMessage[];
@@ -316,6 +421,10 @@ export function toWireSnapshot(snapshot: {
 export function toWireRelayEvent(event: RelayServerEvent): RelayServerMessage {
   if (event.type === "wechat.message") {
     return envelope(event.type, toWireMessage(event.message));
+  }
+
+  if (event.type === "wechat.enter_session") {
+    return envelope(event.type, toWireEnterSessionEvent(event.event));
   }
 
   if (event.type === "wechat.sync.complete") {
@@ -390,6 +499,21 @@ export function parseRelayCommand(raw: unknown): RelayClientCommand {
           sendTextCommand.data.message?.open_kfid ?? sendTextCommand.data.open_kfid,
         content: sendTextCommand.data.message?.content ?? sendTextCommand.data.content,
         msgid: sendTextCommand.data.message?.msgid ?? sendTextCommand.data.msgid,
+      }),
+    };
+  }
+
+  const messageOnEventCommand = messageOnEventCommandSchema.safeParse(raw);
+  if (messageOnEventCommand.success) {
+    return {
+      type: "message_on_event",
+      message: messageOnEventPayloadSchema.parse({
+        code: messageOnEventCommand.data.message?.code ?? messageOnEventCommand.data.code,
+        content:
+          messageOnEventCommand.data.message?.content ??
+          messageOnEventCommand.data.content,
+        msgid:
+          messageOnEventCommand.data.message?.msgid ?? messageOnEventCommand.data.msgid,
       }),
     };
   }

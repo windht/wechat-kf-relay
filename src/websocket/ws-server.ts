@@ -133,6 +133,16 @@ export function createRelayWebSocketServer(input: {
             return;
           }
 
+          if (command.type === "message_on_event") {
+            const result = await input.relayService.sendMessageOnEvent({
+              code: command.message.code,
+              content: command.message.content,
+              msgid: command.message.msgid,
+            });
+            send(socket, envelope("message_on_event.result", { ...result }));
+            return;
+          }
+
           const result = await input.relayService.sendTextMessage({
             touser: command.message.external_userid ?? command.message.touser ?? "",
             openKfId: command.message.open_kfid,

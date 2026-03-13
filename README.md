@@ -25,6 +25,12 @@
 pnpm add wechat-kf-relay
 ```
 
+或：
+
+```bash
+npm install wechat-kf-relay
+```
+
 也可以在本仓库本地开发：
 
 ```bash
@@ -106,6 +112,17 @@ client.on("wechat.message", (message) => {
   console.log(message.text?.content);
 });
 
+client.on("wechat.enter_session", (event) => {
+  if (!event.welcome_code) {
+    return;
+  }
+
+  client.messageOnEvent({
+    code: event.welcome_code,
+    content: "欢迎咨询",
+  });
+});
+
 client.on("wechat.outbound.sent", (event) => {
   console.log(event.result.msgid);
 });
@@ -119,9 +136,11 @@ client.syncNow();
 - `authenticated`
 - `snapshot`
 - `wechat.message`
+- `wechat.enter_session`
 - `wechat.sync.complete`
 - `wechat.outbound.sent`
 - `send_text.result`
+- `message_on_event.result`
 - `relay.error`
 - `socket.error`
 
@@ -136,6 +155,7 @@ client.syncNow();
 - `client.getSnapshot()`
 - `client.syncNow(token?)`
 - `client.sendText({ external_userid, open_kfid, content, msgid? })`
+- `client.messageOnEvent({ code, content, msgid? })`
 
 ## 环境变量
 
@@ -233,6 +253,7 @@ curl -X POST http://127.0.0.1:3000/api/wechat/sync \
 - `snapshot`
 - `pong`
 - `wechat.message`
+- `wechat.enter_session`
 - `wechat.sync.complete`
 - `wechat.outbound.sent`
 - `wechat.callback`
@@ -244,6 +265,7 @@ curl -X POST http://127.0.0.1:3000/api/wechat/sync \
 - `get_snapshot`
 - `sync_now`
 - `send_text`
+- `message_on_event`
 
 ## Echo 测试模式
 

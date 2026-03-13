@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTextReplyPayload } from "../src/wechat/api.js";
+import { buildEventReplyPayload, buildTextReplyPayload } from "../src/wechat/api.js";
 
 describe("buildTextReplyPayload", () => {
   it("maps relay fields into WeChat send_msg payload", () => {
@@ -17,6 +17,23 @@ describe("buildTextReplyPayload", () => {
       msgtype: "text",
       text: {
         content: "hello",
+      },
+    });
+  });
+
+  it("maps event replies into WeChat send_msg_on_event payload", () => {
+    expect(
+      buildEventReplyPayload({
+        code: "welcome-1",
+        content: "欢迎咨询",
+        msgid: "custom-1",
+      }),
+    ).toEqual({
+      code: "welcome-1",
+      msgid: "custom-1",
+      msgtype: "text",
+      text: {
+        content: "欢迎咨询",
       },
     });
   });

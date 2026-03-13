@@ -7,6 +7,7 @@ import {
   createCommand,
   parseRelayServerMessage,
   type RelayClientCommand,
+  type RelayMessageOnEventPayload,
   type RelaySendTextPayload,
   type RelayServerMessage,
   type RelayServerMessageMap,
@@ -144,6 +145,10 @@ export class WechatKfRelayClient extends EventEmitter {
 
   sendText(payload: RelaySendTextPayload) {
     this.sendCommand(createCommand("send_text", payload));
+  }
+
+  messageOnEvent(payload: RelayMessageOnEventPayload) {
+    this.sendCommand(createCommand("message_on_event", payload));
   }
 
   private sendCommand(command: RelayClientCommand) {

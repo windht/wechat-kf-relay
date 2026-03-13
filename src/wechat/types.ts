@@ -13,6 +13,23 @@ export interface WechatCallbackEvent {
   OpenKfId?: string;
 }
 
+export interface WechatEnterSessionWechatChannels {
+  nickname?: string;
+  shop_nickname?: string;
+  scene?: number;
+}
+
+export interface WechatEnterSessionSyncEvent {
+  event_type: "enter_session";
+  open_kfid: string;
+  external_userid: string;
+  scene?: string;
+  scene_param?: string;
+  welcome_code?: string;
+  wechat_channels?: WechatEnterSessionWechatChannels;
+  [key: string]: unknown;
+}
+
 export interface WechatSyncMessage {
   msgid: string;
   open_kfid: string;
@@ -24,7 +41,7 @@ export interface WechatSyncMessage {
     content?: string;
     menu_id?: string;
   };
-  event?: Record<string, unknown>;
+  event?: WechatEnterSessionSyncEvent | Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -49,6 +66,12 @@ export interface SendTextInput {
   msgid?: string;
 }
 
+export interface SendMessageOnEventInput {
+  code: string;
+  content: string;
+  msgid?: string;
+}
+
 export interface NormalizedWechatMessage {
   messageId: string;
   openKfId: string;
@@ -59,6 +82,21 @@ export interface NormalizedWechatMessage {
   text?: {
     content?: string;
     menuId?: string;
+  };
+  raw: WechatSyncMessage;
+}
+
+export interface NormalizedWechatEnterSessionEvent {
+  eventType: "enter_session";
+  openKfId: string;
+  externalUserId: string;
+  scene?: string;
+  sceneParam?: string;
+  welcomeCode?: string;
+  wechatChannels?: {
+    nickname?: string;
+    shopNickname?: string;
+    scene?: number;
   };
   raw: WechatSyncMessage;
 }

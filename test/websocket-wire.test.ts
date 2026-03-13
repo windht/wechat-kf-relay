@@ -95,6 +95,88 @@ describe("websocket wire protocol", () => {
     });
   });
 
+  it("formats enter_session events and message_on_event commands", () => {
+    const event = toWireRelayEvent({
+      type: "wechat.enter_session",
+      event: {
+        eventType: "enter_session",
+        openKfId: "wk-1",
+        externalUserId: "wm-1",
+        scene: "123",
+        sceneParam: "abc",
+        welcomeCode: "welcome-1",
+        wechatChannels: {
+          nickname: "video-account",
+          scene: 1,
+        },
+        raw: {
+          msgid: "event-1",
+          open_kfid: "wk-1",
+          external_userid: "wm-1",
+          send_time: 123,
+          origin: 3,
+          msgtype: "event",
+          event: {
+            event_type: "enter_session",
+            open_kfid: "wk-1",
+            external_userid: "wm-1",
+            scene: "123",
+            scene_param: "abc",
+            welcome_code: "welcome-1",
+          },
+        },
+      },
+    });
+
+    expect(event).toEqual({
+      type: "wechat.enter_session",
+      message: {
+        event_type: "enter_session",
+        open_kfid: "wk-1",
+        external_userid: "wm-1",
+        scene: "123",
+        scene_param: "abc",
+        welcome_code: "welcome-1",
+        wechat_channels: {
+          nickname: "video-account",
+          shop_nickname: undefined,
+          scene: 1,
+        },
+        raw: {
+          msgid: "event-1",
+          open_kfid: "wk-1",
+          external_userid: "wm-1",
+          send_time: 123,
+          origin: 3,
+          msgtype: "event",
+          event: {
+            event_type: "enter_session",
+            open_kfid: "wk-1",
+            external_userid: "wm-1",
+            scene: "123",
+            scene_param: "abc",
+            welcome_code: "welcome-1",
+          },
+        },
+      },
+    });
+
+    expect(
+      parseRelayCommand({
+        type: "message_on_event",
+        message: {
+          code: "welcome-1",
+          content: "欢迎咨询",
+        },
+      }),
+    ).toEqual(
+      createCommand("message_on_event", {
+        code: "welcome-1",
+        content: "欢迎咨询",
+      }),
+    );
+  });
+
   it("normalizes supported websocket commands", () => {
     expect(
       parseRelayCommand({
@@ -139,6 +221,46 @@ describe("websocket wire protocol", () => {
       message: {
         client_id: "client-1",
         ws_path: "/ws",
+      },
+    });
+  });
+
+  it("parses enter_session websocket envelopes", () => {
+    expect(
+      parseRelayServerMessage({
+        type: "wechat.enter_session",
+        message: {
+          event_type: "enter_session",
+          open_kfid: "wk-1",
+          external_userid: "wm-1",
+          scene: "123",
+          scene_param: "abc",
+          welcome_code: "welcome-1",
+          wechat_channels: {
+            nickname: "video-account",
+            scene: 1,
+          },
+          raw: {
+            msgid: "event-1",
+          },
+        },
+      }),
+    ).toEqual({
+      type: "wechat.enter_session",
+      message: {
+        event_type: "enter_session",
+        open_kfid: "wk-1",
+        external_userid: "wm-1",
+        scene: "123",
+        scene_param: "abc",
+        welcome_code: "welcome-1",
+        wechat_channels: {
+          nickname: "video-account",
+          scene: 1,
+        },
+        raw: {
+          msgid: "event-1",
+        },
       },
     });
   });

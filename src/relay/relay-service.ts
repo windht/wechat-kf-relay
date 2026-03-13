@@ -1,9 +1,12 @@
 import type { Logger } from "../logging/logger.js";
 import type { RelayStateStore } from "./state-store.js";
 import type {
+  NormalizedWechatEnterSessionEvent,
   NormalizedWechatMessage,
+  SendMessageOnEventInput,
   SendTextInput,
   WechatCallbackEvent,
+  WechatEnterSessionSyncEvent,
   WechatSyncMessage,
 } from "../wechat/types.js";
 import type { RelayApiClient } from "../wechat/api.js";
@@ -16,6 +19,10 @@ export type RelayServerEvent =
   | {
       type: "wechat.message";
       message: NormalizedWechatMessage;
+    }
+  | {
+      type: "wechat.enter_session";
+      event: NormalizedWechatEnterSessionEvent;
     }
   | {
       type: "wechat.sync.complete";
@@ -96,9 +103,25 @@ export class RelayService {
       });
 
       for (const message of response.msg_list ?? []) {
+        syncedCount += 1;
+
+        if (isEnterSessionMessage(message)) {
+          const normalizedEvent = normalizeEnterSessionEvent(message);
+          this.deps.logger.info("Relaying WeChat enter_session event", {
+            openKfId: normalizedEvent.openKfId,
+            externalUserId: normalizedEvent.externalUserId,
+            scene: normalizedEvent.scene,
+            hasWelcomeCode: Boolean(normalizedEvent.welcomeCode),
+          });
+          this.deps.broadcast({
+            type: "wechat.enter_session",
+            event: normalizedEvent,
+          });
+          continue;
+        }
+
         const normalized = normalizeMessage(message);
         this.pushRecentMessage(normalized);
-        syncedCount += 1;
         this.deps.logger.info("Relaying inbound WeChat message", {
           messageId: normalized.messageId,
           openKfId: normalized.openKfId,
@@ -133,6 +156,17 @@ export class RelayService {
       syncedCount,
       nextCursor: cursor,
     };
+  }
+
+  async sendMessageOnEvent(input: SendMessageOnEventInput) {
+    this.deps.logger.info("Sending outbound relay event response", {
+      code: input.code.slice(0, 8),
+      hasMsgId: Boolean(input.msgid),
+      contentLength: Buffer.byteLength(input.content, "utf8"),
+      textPreview: input.content.slice(0, 120),
+    });
+
+    return this.deps.apiClient.sendMessageOnEvent(input);
   }
 
   async sendTextMessage(input: SendTextInput) {
@@ -228,6 +262,44 @@ function normalizeMessage(message: WechatSyncMessage): NormalizedWechatMessage {
       ? {
           content: message.text.content,
           menuId: message.text.menu_id,
+        }
+      : undefined,
+    raw: message,
+  };
+}
+
+function isEnterSessionMessage(
+  message: WechatSyncMessage,
+): message is WechatSyncMessage & {
+  event: WechatEnterSessionSyncEvent;
+} {
+  return (
+    message.msgtype === "event" &&
+    typeof message.event === "object" &&
+    message.event !== null &&
+    message.event.event_type === "enter_session" &&
+    typeof message.event.open_kfid === "string" &&
+    typeof message.event.external_userid === "string"
+  );
+}
+
+function normalizeEnterSessionEvent(
+  message: WechatSyncMessage & {
+    event: WechatEnterSessionSyncEvent;
+  },
+): NormalizedWechatEnterSessionEvent {
+  return {
+    eventType: "enter_session",
+    openKfId: message.event.open_kfid,
+    externalUserId: message.event.external_userid,
+    scene: message.event.scene,
+    sceneParam: message.event.scene_param,
+    welcomeCode: message.event.welcome_code,
+    wechatChannels: message.event.wechat_channels
+      ? {
+          nickname: message.event.wechat_channels.nickname,
+          shopNickname: message.event.wechat_channels.shop_nickname,
+          scene: message.event.wechat_channels.scene,
         }
       : undefined,
     raw: message,

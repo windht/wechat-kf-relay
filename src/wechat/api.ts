@@ -1,4 +1,5 @@
 import type {
+  SendMessageOnEventInput,
   SendTextInput,
   WechatSendResponse,
   WechatSyncResponse,
@@ -26,6 +27,7 @@ export interface RelayApiClient {
     voiceFormat?: 0 | 1;
   }): Promise<WechatSyncResponse>;
   sendTextMessage(input: SendTextInput): Promise<WechatSendResponse>;
+  sendMessageOnEvent(input: SendMessageOnEventInput): Promise<WechatSendResponse>;
 }
 
 interface CachedToken {
@@ -45,6 +47,17 @@ export function buildTextReplyPayload(input: SendTextInput) {
   return {
     touser: input.touser,
     open_kfid: input.openKfId,
+    msgid: input.msgid,
+    msgtype: "text",
+    text: {
+      content: input.content,
+    },
+  };
+}
+
+export function buildEventReplyPayload(input: SendMessageOnEventInput) {
+  return {
+    code: input.code,
     msgid: input.msgid,
     msgtype: "text",
     text: {
@@ -159,6 +172,34 @@ export class WechatKfApiClient implements RelayApiClient {
     }
 
     this.logger.info("WeChat kf/send_msg completed", {
+      msgid: payload.msgid,
+    });
+
+    return payload;
+  }
+
+  async sendMessageOnEvent(input: SendMessageOnEventInput) {
+    const accessToken = await this.getAccessToken();
+    const url = new URL("/cgi-bin/kf/send_msg_on_event", this.config.baseUrl);
+    url.searchParams.set("access_token", accessToken);
+    this.logger.info("Calling WeChat kf/send_msg_on_event", {
+      code: redactTokenPreview(input.code),
+      hasMsgId: Boolean(input.msgid),
+      contentLength: Buffer.byteLength(input.content, "utf8"),
+    });
+
+    const payload = await this.postJson<WechatSendResponse>(
+      url,
+      buildEventReplyPayload(input),
+    );
+
+    if (payload.errcode !== 0) {
+      throw new Error(
+        `kf/send_msg_on_event failed: ${payload.errcode} ${payload.errmsg}`,
+      );
+    }
+
+    this.logger.info("WeChat kf/send_msg_on_event completed", {
       msgid: payload.msgid,
     });
 
