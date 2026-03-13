@@ -53,6 +53,18 @@ export interface WechatSyncResponse {
   msg_list?: WechatSyncMessage[];
 }
 
+export interface WechatKfAccount {
+  open_kfid: string;
+  name: string;
+  avatar: string;
+}
+
+export interface WechatKfAccountListResponse {
+  errcode: number;
+  errmsg: string;
+  account_list?: WechatKfAccount[];
+}
+
 export interface WechatSendResponse {
   errcode: number;
   errmsg: string;
@@ -99,4 +111,10 @@ export interface NormalizedWechatEnterSessionEvent {
     scene?: number;
   };
   raw: WechatSyncMessage;
+}
+
+export interface NormalizedWechatKfAccount {
+  openKfId: string;
+  name: string;
+  avatar: string;
 }

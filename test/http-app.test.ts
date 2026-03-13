@@ -30,6 +30,14 @@ describe("createApp", () => {
         }),
         getSnapshot: vi.fn().mockReturnValue({
           nextCursor: "cursor-1",
+          subscribedOpenKfId: undefined,
+          kfAccounts: [
+            {
+              openKfId: "wk-1",
+              name: "Primary",
+              avatar: "https://example.com/a.png",
+            },
+          ],
           recentMessages: [
             {
               messageId: "msg-1",
@@ -68,6 +76,14 @@ describe("createApp", () => {
     expect(stateResponse.status).toBe(200);
     expect(stateResponse.body).toEqual({
       next_cursor: "cursor-1",
+      subscribed_open_kfid: undefined,
+      kf_accounts: [
+        {
+          open_kfid: "wk-1",
+          name: "Primary",
+          avatar: "https://example.com/a.png",
+        },
+      ],
       recent_messages: [
         {
           message_id: "msg-1",
@@ -162,6 +178,8 @@ function createRelayServiceStub(overrides: Record<string, unknown> = {}) {
     }),
     getSnapshot: vi.fn().mockReturnValue({
       nextCursor: undefined,
+      subscribedOpenKfId: undefined,
+      kfAccounts: [],
       recentMessages: [],
     }),
     ...overrides,

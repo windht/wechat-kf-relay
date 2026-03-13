@@ -143,6 +143,14 @@ export class WechatKfRelayClient extends EventEmitter {
     );
   }
 
+  subscribeTo(openKfId: string) {
+    this.sendCommand(
+      createCommand("subscribe", {
+        open_kfid: openKfId,
+      }),
+    );
+  }
+
   sendText(payload: RelaySendTextPayload) {
     this.sendCommand(createCommand("send_text", payload));
   }

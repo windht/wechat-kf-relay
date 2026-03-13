@@ -1,6 +1,8 @@
 import type {
   SendMessageOnEventInput,
   SendTextInput,
+  WechatKfAccount,
+  WechatKfAccountListResponse,
   WechatSendResponse,
   WechatSyncResponse,
 } from "./types.js";
@@ -20,6 +22,9 @@ interface WechatApiConfig {
 }
 
 export interface RelayApiClient {
+  listAccounts(input?: {
+    limit?: number;
+  }): Promise<WechatKfAccount[]>;
   syncMessages(input: {
     cursor?: string;
     token?: string;
@@ -149,6 +154,53 @@ export class WechatKfApiClient implements RelayApiClient {
     });
 
     return payload;
+  }
+
+  async listAccounts(input: {
+    limit?: number;
+  } = {}) {
+    const accessToken = await this.getAccessToken();
+    const url = new URL("/cgi-bin/kf/account/list", this.config.baseUrl);
+    const limit = input.limit ?? 100;
+    let offset = 0;
+    const accountList: WechatKfAccount[] = [];
+
+    url.searchParams.set("access_token", accessToken);
+
+    while (true) {
+      this.logger.info("Calling WeChat kf/account/list", {
+        offset,
+        limit,
+      });
+
+      const payload = await this.postJson<WechatKfAccountListResponse>(url, {
+        offset,
+        limit,
+      });
+
+      if (payload.errcode !== 0) {
+        throw new Error(
+          `kf/account/list failed: ${payload.errcode} ${payload.errmsg}`,
+        );
+      }
+
+      const pageAccounts = payload.account_list ?? [];
+      accountList.push(...pageAccounts);
+      this.logger.info("WeChat kf/account/list page completed", {
+        offset,
+        limit,
+        pageSize: pageAccounts.length,
+        totalAccounts: accountList.length,
+      });
+
+      if (pageAccounts.length < limit) {
+        break;
+      }
+
+      offset += pageAccounts.length;
+    }
+
+    return accountList;
   }
 
   async sendTextMessage(input: SendTextInput) {

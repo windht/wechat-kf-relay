@@ -46,6 +46,14 @@ describe("WechatKfRelay server package", () => {
     expect(unauthorizedState.status).toBe(401);
     expect(authorizedState.status).toBe(200);
     expect(authorizedState.body).toEqual({
+      subscribed_open_kfid: undefined,
+      kf_accounts: [
+        {
+          open_kfid: "wk-1",
+          name: "Primary",
+          avatar: "https://example.com/a.png",
+        },
+      ],
       next_cursor: undefined,
       recent_messages: [],
     });
@@ -70,6 +78,14 @@ describe("WechatKfRelay server package", () => {
     expect(authorizedMessages[1]).toEqual({
       type: "snapshot",
       message: {
+        subscribed_open_kfid: undefined,
+        kf_accounts: [
+          {
+            open_kfid: "wk-1",
+            name: "Primary",
+            avatar: "https://example.com/a.png",
+          },
+        ],
         next_cursor: undefined,
         recent_messages: [],
       },
@@ -97,6 +113,13 @@ function createRelay(overrides: Partial<ConstructorParameters<typeof WechatKfRel
       async setNextCursor() {},
     },
     apiClient: {
+      listAccounts: vi.fn().mockResolvedValue([
+        {
+          open_kfid: "wk-1",
+          name: "Primary",
+          avatar: "https://example.com/a.png",
+        },
+      ]),
       syncMessages: vi.fn().mockResolvedValue({
         errcode: 0,
         errmsg: "ok",

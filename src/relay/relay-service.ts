@@ -2,16 +2,22 @@ import type { Logger } from "../logging/logger.js";
 import type { RelayStateStore } from "./state-store.js";
 import type {
   NormalizedWechatEnterSessionEvent,
+  NormalizedWechatKfAccount,
   NormalizedWechatMessage,
   SendMessageOnEventInput,
   SendTextInput,
   WechatCallbackEvent,
+  WechatKfAccount,
   WechatEnterSessionSyncEvent,
   WechatSyncMessage,
 } from "../wechat/types.js";
 import type { RelayApiClient } from "../wechat/api.js";
 
 export type RelayServerEvent =
+  | {
+      type: "subscribed";
+      openKfId: string;
+    }
   | {
       type: "wechat.callback";
       callback: WechatCallbackEvent;
@@ -41,8 +47,17 @@ export type RelayServerEvent =
       message: string;
     };
 
+export interface RelaySnapshot {
+  nextCursor?: string;
+  subscribedOpenKfId?: string;
+  kfAccounts: NormalizedWechatKfAccount[];
+  recentMessages: NormalizedWechatMessage[];
+}
+
 export class RelayService {
   private readonly recentMessages: NormalizedWechatMessage[] = [];
+  private readonly welcomeCodeOwners = new Map<string, string>();
+  private kfAccounts: NormalizedWechatKfAccount[] = [];
 
   constructor(
     private readonly deps: {
@@ -56,6 +71,25 @@ export class RelayService {
       };
     },
   ) {}
+
+  async refreshKfAccounts() {
+    const accounts = await this.deps.apiClient.listAccounts();
+    this.kfAccounts = accounts.map(normalizeKfAccount);
+    this.deps.logger.info("Loaded WeChat kf accounts", {
+      accountCount: this.kfAccounts.length,
+      openKfIds: this.kfAccounts.map((account) => account.openKfId),
+    });
+
+    return [...this.kfAccounts];
+  }
+
+  hasKfAccount(openKfId: string) {
+    return this.kfAccounts.some((account) => account.openKfId === openKfId);
+  }
+
+  canReplyToEventCode(openKfId: string, code: string) {
+    return this.welcomeCodeOwners.get(code) === openKfId;
+  }
 
   async handleCallbackEvent(callback: WechatCallbackEvent) {
     this.deps.logger.info("Received decrypted callback event", {
@@ -107,6 +141,12 @@ export class RelayService {
 
         if (isEnterSessionMessage(message)) {
           const normalizedEvent = normalizeEnterSessionEvent(message);
+          if (normalizedEvent.welcomeCode) {
+            this.rememberWelcomeCode(
+              normalizedEvent.openKfId,
+              normalizedEvent.welcomeCode,
+            );
+          }
           this.deps.logger.info("Relaying WeChat enter_session event", {
             openKfId: normalizedEvent.openKfId,
             externalUserId: normalizedEvent.externalUserId,
@@ -170,6 +210,7 @@ export class RelayService {
   }
 
   async sendTextMessage(input: SendTextInput) {
+    this.ensureKnownKfAccount(input.openKfId);
     this.deps.logger.info("Sending outbound relay text message", {
       touser: input.touser,
       openKfId: input.openKfId,
@@ -200,10 +241,21 @@ export class RelayService {
     return result;
   }
 
-  getSnapshot() {
+  getSnapshot(input: {
+    openKfId?: string;
+    requireSubscription?: boolean;
+  } = {}): RelaySnapshot {
+    const recentMessages = input.openKfId
+      ? this.recentMessages.filter((message) => message.openKfId === input.openKfId)
+      : input.requireSubscription
+        ? []
+        : [...this.recentMessages];
+
     return {
       nextCursor: this.deps.stateStore.getState().nextCursor,
-      recentMessages: [...this.recentMessages],
+      subscribedOpenKfId: input.openKfId,
+      kfAccounts: [...this.kfAccounts],
+      recentMessages,
     };
   }
 
@@ -248,6 +300,25 @@ export class RelayService {
       });
     }
   }
+
+  private ensureKnownKfAccount(openKfId: string) {
+    if (!this.hasKfAccount(openKfId)) {
+      throw new Error(`Unknown WeChat kf account: ${openKfId}`);
+    }
+  }
+
+  private rememberWelcomeCode(openKfId: string, code: string) {
+    this.welcomeCodeOwners.set(code, openKfId);
+
+    if (this.welcomeCodeOwners.size <= 500) {
+      return;
+    }
+
+    const oldestCode = this.welcomeCodeOwners.keys().next().value;
+    if (oldestCode) {
+      this.welcomeCodeOwners.delete(oldestCode);
+    }
+  }
 }
 
 function normalizeMessage(message: WechatSyncMessage): NormalizedWechatMessage {
@@ -265,6 +336,14 @@ function normalizeMessage(message: WechatSyncMessage): NormalizedWechatMessage {
         }
       : undefined,
     raw: message,
+  };
+}
+
+function normalizeKfAccount(account: WechatKfAccount): NormalizedWechatKfAccount {
+  return {
+    openKfId: account.open_kfid,
+    name: account.name,
+    avatar: account.avatar,
   };
 }
 

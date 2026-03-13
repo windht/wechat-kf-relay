@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { RelayServerEvent } from "../relay/relay-service.js";
 import type {
   NormalizedWechatEnterSessionEvent,
+  NormalizedWechatKfAccount,
   NormalizedWechatMessage,
 } from "../wechat/types.js";
 
@@ -22,7 +23,15 @@ export interface RelayWireWechatMessage {
 
 export interface RelayWireSnapshot {
   next_cursor?: string;
+  subscribed_open_kfid?: string;
+  kf_accounts: RelayWireKfAccount[];
   recent_messages: RelayWireWechatMessage[];
+}
+
+export interface RelayWireKfAccount {
+  open_kfid: string;
+  name: string;
+  avatar: string;
 }
 
 export interface RelayWireWechatEnterSessionEvent {
@@ -47,6 +56,10 @@ export interface RelayAuthenticatedMessage {
 
 export interface RelayPongMessage {
   timestamp_ms: number;
+}
+
+export interface RelaySubscribedMessage {
+  open_kfid: string;
 }
 
 export interface RelaySyncNowResultMessage {
@@ -80,6 +93,10 @@ export interface RelayMessageOnEventResultMessage {
   msgid?: string;
 }
 
+export interface RelaySubscribePayload {
+  open_kfid: string;
+}
+
 export interface RelayOutboundSentMessage {
   request: RelaySendTextPayload;
   result: {
@@ -103,6 +120,7 @@ export interface RelayErrorMessage {
 export interface RelayServerMessageMap {
   authenticated: RelayAuthenticatedMessage;
   snapshot: RelayWireSnapshot;
+  subscribed: RelaySubscribedMessage;
   pong: RelayPongMessage;
   "sync_now.result": RelaySyncNowResultMessage;
   "send_text.result": RelaySendTextResultMessage;
@@ -130,6 +148,7 @@ export type RelayServerEnvelope<Type extends keyof RelayServerMessageMap> = {
 export interface RelayClientCommandMap {
   ping: Record<string, never>;
   get_snapshot: Record<string, never>;
+  subscribe: RelaySubscribePayload;
   sync_now: {
     token?: string;
   };
@@ -165,8 +184,16 @@ const wireMessageSchema: z.ZodType<RelayWireWechatMessage> = z.object({
   raw: z.record(z.string(), z.unknown()),
 });
 
+const wireKfAccountSchema: z.ZodType<RelayWireKfAccount> = z.object({
+  open_kfid: z.string(),
+  name: z.string(),
+  avatar: z.string(),
+});
+
 const snapshotSchema: z.ZodType<RelayWireSnapshot> = z.object({
   next_cursor: z.string().optional(),
+  subscribed_open_kfid: z.string().optional(),
+  kf_accounts: z.array(wireKfAccountSchema),
   recent_messages: z.array(wireMessageSchema),
 });
 
@@ -194,6 +221,10 @@ const authenticatedSchema: z.ZodType<RelayAuthenticatedMessage> = z.object({
 
 const pongSchema: z.ZodType<RelayPongMessage> = z.object({
   timestamp_ms: z.number(),
+});
+
+const subscribedSchema: z.ZodType<RelaySubscribedMessage> = z.object({
+  open_kfid: z.string(),
 });
 
 const syncNowResultSchema: z.ZodType<RelaySyncNowResultMessage> = z.object({
@@ -237,6 +268,10 @@ const messageOnEventResultSchema: z.ZodType<RelayMessageOnEventResultMessage> = 
   msgid: z.string().optional(),
 });
 
+const subscribePayloadSchema: z.ZodType<RelaySubscribePayload> = z.object({
+  open_kfid: z.string().min(1),
+});
+
 const outboundSentSchema: z.ZodType<RelayOutboundSentMessage> = z.object({
   request: sendTextPayloadSchema,
   result: z.object({
@@ -265,6 +300,10 @@ const serverMessageSchema: z.ZodType<RelayServerMessage> = z.discriminatedUnion(
   z.object({
     type: z.literal("snapshot"),
     message: snapshotSchema,
+  }),
+  z.object({
+    type: z.literal("subscribed"),
+    message: subscribedSchema,
   }),
   z.object({
     type: z.literal("pong"),
@@ -323,6 +362,16 @@ const syncNowCommandSchema = z.object({
   message: z
     .object({
       token: z.string().optional(),
+    })
+    .optional(),
+});
+
+const subscribeCommandSchema = z.object({
+  type: z.literal("subscribe"),
+  open_kfid: z.string().min(1).optional(),
+  message: z
+    .object({
+      open_kfid: z.string().min(1).optional(),
     })
     .optional(),
 });
@@ -408,12 +457,24 @@ export function toWireEnterSessionEvent(
   };
 }
 
+export function toWireKfAccount(account: NormalizedWechatKfAccount): RelayWireKfAccount {
+  return {
+    open_kfid: account.openKfId,
+    name: account.name,
+    avatar: account.avatar,
+  };
+}
+
 export function toWireSnapshot(snapshot: {
   nextCursor?: string;
+  subscribedOpenKfId?: string;
+  kfAccounts: NormalizedWechatKfAccount[];
   recentMessages: NormalizedWechatMessage[];
 }): RelayWireSnapshot {
   return {
     next_cursor: snapshot.nextCursor,
+    subscribed_open_kfid: snapshot.subscribedOpenKfId,
+    kf_accounts: snapshot.kfAccounts.map(toWireKfAccount),
     recent_messages: snapshot.recentMessages.map(toWireMessage),
   };
 }
@@ -425,6 +486,12 @@ export function toWireRelayEvent(event: RelayServerEvent): RelayServerMessage {
 
   if (event.type === "wechat.enter_session") {
     return envelope(event.type, toWireEnterSessionEvent(event.event));
+  }
+
+  if (event.type === "subscribed") {
+    return envelope(event.type, {
+      open_kfid: event.openKfId,
+    });
   }
 
   if (event.type === "wechat.sync.complete") {
@@ -483,6 +550,18 @@ export function parseRelayCommand(raw: unknown): RelayClientCommand {
       message: {
         token: syncNowCommand.data.message?.token ?? syncNowCommand.data.token,
       },
+    };
+  }
+
+  const subscribeCommand = subscribeCommandSchema.safeParse(raw);
+  if (subscribeCommand.success) {
+    return {
+      type: "subscribe",
+      message: subscribePayloadSchema.parse({
+        open_kfid:
+          subscribeCommand.data.message?.open_kfid ??
+          subscribeCommand.data.open_kfid,
+      }),
     };
   }
 

@@ -27,7 +27,13 @@ export function createRelayWebSocketServer(input: {
   serverKey?: string;
   ready?: Promise<void>;
 }): RelayWebSocketServer {
-  const sockets = new Map<string, WebSocket>();
+  const sockets = new Map<
+    string,
+    {
+      socket: WebSocket;
+      subscribedOpenKfId?: string;
+    }
+  >();
   const ready = input.ready ?? Promise.resolve();
   let wss: WebSocketServer | undefined;
   let attachedServer: HttpServer | undefined;
@@ -39,8 +45,12 @@ export function createRelayWebSocketServer(input: {
   };
 
   const broadcast = (payload: RelayServerEvent) => {
-    for (const socket of sockets.values()) {
-      send(socket, toWireRelayEvent(payload));
+    for (const connection of sockets.values()) {
+      if (!shouldDeliverEvent(connection.subscribedOpenKfId, payload)) {
+        continue;
+      }
+
+      send(connection.socket, toWireRelayEvent(payload));
     }
   };
 
@@ -69,7 +79,13 @@ export function createRelayWebSocketServer(input: {
 
     wss.on("connection", (socket) => {
       const clientId = randomUUID();
-      sockets.set(clientId, socket);
+      const connectionState: {
+        socket: WebSocket;
+        subscribedOpenKfId?: string;
+      } = {
+        socket,
+      };
+      sockets.set(clientId, connectionState);
       input.logger.info("WebSocket client connected", {
         clientId,
         path: input.path,
@@ -82,10 +98,7 @@ export function createRelayWebSocketServer(input: {
             client_id: clientId,
             ws_path: input.path,
           }));
-          send(
-            socket,
-            envelope("snapshot", toWireSnapshot(input.relayService.getSnapshot())),
-          );
+          sendSnapshot(socket, connectionState.subscribedOpenKfId);
         })
         .catch((error) => {
           const messageText =
@@ -115,10 +128,24 @@ export function createRelayWebSocketServer(input: {
           }
 
           if (command.type === "get_snapshot") {
-            send(
-              socket,
-              envelope("snapshot", toWireSnapshot(input.relayService.getSnapshot())),
-            );
+            sendSnapshot(socket, connectionState.subscribedOpenKfId);
+            return;
+          }
+
+          if (command.type === "subscribe") {
+            if (!input.relayService.hasKfAccount(command.message.open_kfid)) {
+              throw new Error(`Unknown WeChat kf account: ${command.message.open_kfid}`);
+            }
+
+            connectionState.subscribedOpenKfId = command.message.open_kfid;
+            input.logger.info("WebSocket client subscribed to WeChat kf", {
+              clientId,
+              openKfId: connectionState.subscribedOpenKfId,
+            });
+            send(socket, envelope("subscribed", {
+              open_kfid: command.message.open_kfid,
+            }));
+            sendSnapshot(socket, connectionState.subscribedOpenKfId);
             return;
           }
 
@@ -134,6 +161,19 @@ export function createRelayWebSocketServer(input: {
           }
 
           if (command.type === "message_on_event") {
+            const subscribedOpenKfId = requireSubscribedOpenKfId(connectionState);
+
+            if (
+              !input.relayService.canReplyToEventCode(
+                subscribedOpenKfId,
+                command.message.code,
+              )
+            ) {
+              throw new Error(
+                `message_on_event is limited to the subscribed open_kfid ${subscribedOpenKfId}`,
+              );
+            }
+
             const result = await input.relayService.sendMessageOnEvent({
               code: command.message.code,
               content: command.message.content,
@@ -141,6 +181,13 @@ export function createRelayWebSocketServer(input: {
             });
             send(socket, envelope("message_on_event.result", { ...result }));
             return;
+          }
+
+          const subscribedOpenKfId = requireSubscribedOpenKfId(connectionState);
+          if (command.message.open_kfid !== subscribedOpenKfId) {
+            throw new Error(
+              `send_text is limited to the subscribed open_kfid ${subscribedOpenKfId}`,
+            );
           }
 
           const result = await input.relayService.sendTextMessage({
@@ -174,6 +221,21 @@ export function createRelayWebSocketServer(input: {
     });
   };
 
+  const sendSnapshot = (socket: WebSocket, openKfId?: string) => {
+    send(
+      socket,
+      envelope(
+        "snapshot",
+        toWireSnapshot(
+          input.relayService.getSnapshot({
+            openKfId,
+            requireSubscription: true,
+          }),
+        ),
+      ),
+    );
+  };
+
   return {
     attach(server) {
       if (attachedServer && attachedServer !== server) {
@@ -187,8 +249,8 @@ export function createRelayWebSocketServer(input: {
       return sockets.size;
     },
     async close() {
-      for (const socket of sockets.values()) {
-        socket.close();
+      for (const connection of sockets.values()) {
+        connection.socket.close();
       }
 
       if (!wss) {
@@ -210,4 +272,48 @@ export function createRelayWebSocketServer(input: {
       attachedServer = undefined;
     },
   };
+}
+
+function requireSubscribedOpenKfId(input: { subscribedOpenKfId?: string }) {
+  if (!input.subscribedOpenKfId) {
+    throw new Error("Subscribe to an open_kfid before sending account-scoped commands");
+  }
+
+  return input.subscribedOpenKfId;
+}
+
+function shouldDeliverEvent(
+  subscribedOpenKfId: string | undefined,
+  event: RelayServerEvent,
+) {
+  const eventOpenKfId = getEventOpenKfId(event);
+  if (!eventOpenKfId) {
+    return true;
+  }
+
+  return subscribedOpenKfId === eventOpenKfId;
+}
+
+function getEventOpenKfId(event: RelayServerEvent) {
+  if (event.type === "wechat.message") {
+    return event.message.openKfId;
+  }
+
+  if (event.type === "wechat.enter_session") {
+    return event.event.openKfId;
+  }
+
+  if (event.type === "wechat.outbound.sent") {
+    return event.request.open_kfid;
+  }
+
+  if (event.type === "wechat.callback") {
+    return event.callback.OpenKfId;
+  }
+
+  if (event.type === "subscribed") {
+    return event.openKfId;
+  }
+
+  return undefined;
 }

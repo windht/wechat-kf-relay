@@ -61,7 +61,6 @@ export class WechatKfRelay {
     const stateStore =
       options.stateStore ??
       new FileRelayStateStore(this.config.stateFile, this.logger.child("state"));
-    this.readyPromise = Promise.resolve(stateStore.init?.()).then(() => undefined);
 
     const apiClient =
       options.apiClient ??
@@ -85,6 +84,10 @@ export class WechatKfRelay {
       logger: this.logger.child("relay"),
       echoTest: this.config.echoTest,
     });
+    this.readyPromise = Promise.all([
+      Promise.resolve(stateStore.init?.()).then(() => undefined),
+      this.relayService.refreshKfAccounts().then(() => undefined),
+    ]).then(() => undefined);
 
     this.websocketServer = createRelayWebSocketServer({
       path: this.config.wsPath,

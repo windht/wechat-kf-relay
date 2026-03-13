@@ -6,11 +6,22 @@ import { RelayService } from "../src/relay/relay-service.js";
 describe("RelayService", () => {
   it("broadcasts synced messages and updates the cursor", async () => {
     const broadcast = vi.fn();
-    const setNextCursor = vi.fn();
+    let nextCursor = "cursor-1";
+    const setNextCursor = vi.fn(async (cursor?: string) => {
+      nextCursor = cursor ?? "";
+    });
     const sendTextMessage = vi.fn();
     const sendMessageOnEvent = vi.fn();
+    const listAccounts = vi.fn().mockResolvedValue([
+      {
+        open_kfid: "kf-1",
+        name: "Primary",
+        avatar: "https://example.com/a.png",
+      },
+    ]);
     const relayService = new RelayService({
       apiClient: {
+        listAccounts,
         syncMessages: vi.fn().mockResolvedValue({
           errcode: 0,
           errmsg: "ok",
@@ -35,7 +46,7 @@ describe("RelayService", () => {
       } as never,
       stateStore: {
         getState: () => ({
-          nextCursor: "cursor-1",
+          nextCursor,
         }),
         setNextCursor,
       } as never,
@@ -47,6 +58,7 @@ describe("RelayService", () => {
       },
     });
 
+    await relayService.refreshKfAccounts();
     const result = await relayService.syncNow({
       callbackToken: "sync-token",
     });
@@ -63,6 +75,24 @@ describe("RelayService", () => {
     );
     expect(sendTextMessage).not.toHaveBeenCalled();
     expect(sendMessageOnEvent).not.toHaveBeenCalled();
+    expect(listAccounts).toHaveBeenCalledTimes(1);
+    expect(relayService.getSnapshot()).toEqual({
+      nextCursor: "cursor-2",
+      subscribedOpenKfId: undefined,
+      kfAccounts: [
+        {
+          openKfId: "kf-1",
+          name: "Primary",
+          avatar: "https://example.com/a.png",
+        },
+      ],
+      recentMessages: [
+        expect.objectContaining({
+          messageId: "msg-1",
+          openKfId: "kf-1",
+        }),
+      ],
+    });
   });
 
   it("echoes inbound customer text when echo test is enabled", async () => {
@@ -73,6 +103,13 @@ describe("RelayService", () => {
     });
     const relayService = new RelayService({
       apiClient: {
+        listAccounts: vi.fn().mockResolvedValue([
+          {
+            open_kfid: "kf-1",
+            name: "Primary",
+            avatar: "https://example.com/a.png",
+          },
+        ]),
         syncMessages: vi.fn().mockResolvedValue({
           errcode: 0,
           errmsg: "ok",
@@ -109,6 +146,7 @@ describe("RelayService", () => {
       },
     });
 
+    await relayService.refreshKfAccounts();
     await relayService.syncNow({
       callbackToken: "sync-token",
     });
@@ -125,6 +163,18 @@ describe("RelayService", () => {
     let nextCursor = "cursor-1";
     const relayService = new RelayService({
       apiClient: {
+        listAccounts: vi.fn().mockResolvedValue([
+          {
+            open_kfid: "kf-1",
+            name: "Primary",
+            avatar: "https://example.com/a.png",
+          },
+          {
+            open_kfid: "kf-2",
+            name: "Secondary",
+            avatar: "https://example.com/b.png",
+          },
+        ]),
         syncMessages: vi.fn().mockResolvedValue({
           errcode: 0,
           errmsg: "ok",
@@ -172,6 +222,7 @@ describe("RelayService", () => {
       },
     });
 
+    await relayService.refreshKfAccounts();
     const result = await relayService.syncNow({
       callbackToken: "sync-token",
     });
@@ -218,8 +269,40 @@ describe("RelayService", () => {
     });
     expect(relayService.getSnapshot()).toEqual({
       nextCursor: "cursor-2",
+      subscribedOpenKfId: undefined,
+      kfAccounts: [
+        {
+          openKfId: "kf-1",
+          name: "Primary",
+          avatar: "https://example.com/a.png",
+        },
+        {
+          openKfId: "kf-2",
+          name: "Secondary",
+          avatar: "https://example.com/b.png",
+        },
+      ],
       recentMessages: [],
     });
+    expect(relayService.getSnapshot({ openKfId: "kf-1" })).toEqual({
+      nextCursor: "cursor-2",
+      subscribedOpenKfId: "kf-1",
+      kfAccounts: [
+        {
+          openKfId: "kf-1",
+          name: "Primary",
+          avatar: "https://example.com/a.png",
+        },
+        {
+          openKfId: "kf-2",
+          name: "Secondary",
+          avatar: "https://example.com/b.png",
+        },
+      ],
+      recentMessages: [],
+    });
+    expect(relayService.canReplyToEventCode("kf-1", "welcome-1")).toBe(true);
+    expect(relayService.canReplyToEventCode("kf-2", "welcome-1")).toBe(false);
   });
 
   it("forwards message_on_event replies to the API client", async () => {
@@ -230,6 +313,13 @@ describe("RelayService", () => {
     });
     const relayService = new RelayService({
       apiClient: {
+        listAccounts: vi.fn().mockResolvedValue([
+          {
+            open_kfid: "kf-1",
+            name: "Primary",
+            avatar: "https://example.com/a.png",
+          },
+        ]),
         syncMessages: vi.fn(),
         sendTextMessage: vi.fn(),
         sendMessageOnEvent,
@@ -246,6 +336,7 @@ describe("RelayService", () => {
       },
     });
 
+    await relayService.refreshKfAccounts();
     const result = await relayService.sendMessageOnEvent({
       code: "welcome-1",
       content: "欢迎咨询",
@@ -262,5 +353,42 @@ describe("RelayService", () => {
       errmsg: "ok",
       msgid: "event-msg-1",
     });
+  });
+
+  it("rejects sends for unknown kf accounts", async () => {
+    const relayService = new RelayService({
+      apiClient: {
+        listAccounts: vi.fn().mockResolvedValue([
+          {
+            open_kfid: "kf-1",
+            name: "Primary",
+            avatar: "https://example.com/a.png",
+          },
+        ]),
+        syncMessages: vi.fn(),
+        sendTextMessage: vi.fn(),
+        sendMessageOnEvent: vi.fn(),
+      } as never,
+      stateStore: {
+        getState: () => ({}),
+        setNextCursor: vi.fn(),
+      } as never,
+      broadcast: vi.fn(),
+      logger: noopLogger,
+      echoTest: {
+        enabled: false,
+        prefix: "",
+      },
+    });
+
+    await relayService.refreshKfAccounts();
+
+    await expect(
+      relayService.sendTextMessage({
+        touser: "user-1",
+        openKfId: "kf-2",
+        content: "hello",
+      }),
+    ).rejects.toThrow("Unknown WeChat kf account");
   });
 });

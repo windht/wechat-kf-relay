@@ -48,6 +48,14 @@ describe("websocket wire protocol", () => {
   it("formats snapshot and relay events as snake_case", () => {
     const snapshot = toWireSnapshot({
       nextCursor: "cursor-1",
+      subscribedOpenKfId: "wk-1",
+      kfAccounts: [
+        {
+          openKfId: "wk-1",
+          name: "Primary",
+          avatar: "https://example.com/a.png",
+        },
+      ],
       recentMessages: [
         {
           messageId: "msg-1",
@@ -70,6 +78,10 @@ describe("websocket wire protocol", () => {
         },
       ],
     });
+    const subscribed = toWireRelayEvent({
+      type: "subscribed",
+      openKfId: "wk-1",
+    });
     const event = toWireRelayEvent({
       type: "wechat.sync.complete",
       syncedCount: 1,
@@ -78,6 +90,14 @@ describe("websocket wire protocol", () => {
 
     expect(snapshot).toMatchObject({
       next_cursor: "cursor-1",
+      subscribed_open_kfid: "wk-1",
+      kf_accounts: [
+        {
+          open_kfid: "wk-1",
+          name: "Primary",
+          avatar: "https://example.com/a.png",
+        },
+      ],
       recent_messages: [
         {
           message_id: "msg-1",
@@ -85,6 +105,12 @@ describe("websocket wire protocol", () => {
           external_userid: "wm-1",
         },
       ],
+    });
+    expect(subscribed).toEqual({
+      type: "subscribed",
+      message: {
+        open_kfid: "wk-1",
+      },
     });
     expect(event).toEqual({
       type: "wechat.sync.complete",
@@ -180,6 +206,19 @@ describe("websocket wire protocol", () => {
   it("normalizes supported websocket commands", () => {
     expect(
       parseRelayCommand({
+        type: "subscribe",
+        message: {
+          open_kfid: "wk-1",
+        },
+      }),
+    ).toEqual(
+      createCommand("subscribe", {
+        open_kfid: "wk-1",
+      }),
+    );
+
+    expect(
+      parseRelayCommand({
         type: "send_text",
         message: {
           external_userid: "wm-1",
@@ -221,6 +260,22 @@ describe("websocket wire protocol", () => {
       message: {
         client_id: "client-1",
         ws_path: "/ws",
+      },
+    });
+  });
+
+  it("parses subscribed websocket envelopes", () => {
+    expect(
+      parseRelayServerMessage({
+        type: "subscribed",
+        message: {
+          open_kfid: "wk-1",
+        },
+      }),
+    ).toEqual({
+      type: "subscribed",
+      message: {
+        open_kfid: "wk-1",
       },
     });
   });

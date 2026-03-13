@@ -25,6 +25,36 @@ describe("WechatKfRelay client package", () => {
         has_more: 0,
         msg_list: [
           {
+            msgid: "msg-ignored-1",
+            open_kfid: "wk-2",
+            external_userid: "wm-2",
+            send_time: 121,
+            origin: 3,
+            msgtype: "text",
+            text: {
+              content: "hidden",
+            },
+          },
+          {
+            msgid: "msg-1",
+            open_kfid: "wk-1",
+            external_userid: "wm-1",
+            send_time: 123,
+            origin: 3,
+            msgtype: "text",
+            text: {
+              content: "hello",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        errcode: 0,
+        errmsg: "ok",
+        next_cursor: "cursor-3",
+        has_more: 0,
+        msg_list: [
+          {
             msgid: "event-1",
             open_kfid: "wk-1",
             external_userid: "wm-1",
@@ -41,14 +71,25 @@ describe("WechatKfRelay client package", () => {
             },
           },
           {
-            msgid: "msg-1",
+            msgid: "msg-2",
             open_kfid: "wk-1",
             external_userid: "wm-1",
-            send_time: 123,
+            send_time: 124,
             origin: 3,
             msgtype: "text",
             text: {
-              content: "hello",
+              content: "subscribed",
+            },
+          },
+          {
+            msgid: "msg-ignored-2",
+            open_kfid: "wk-2",
+            external_userid: "wm-2",
+            send_time: 125,
+            origin: 3,
+            msgtype: "text",
+            text: {
+              content: "hidden-again",
             },
           },
         ],
@@ -64,6 +105,7 @@ describe("WechatKfRelay client package", () => {
       errmsg: "ok",
       msgid: "event-out-1",
     });
+    let nextCursor: string | undefined;
 
     const relay = new WechatKfRelay({
       host: "127.0.0.1",
@@ -78,9 +120,13 @@ describe("WechatKfRelay client package", () => {
       stateStore: {
         async init() {},
         getState() {
-          return {};
+          return {
+            nextCursor,
+          };
         },
-        async setNextCursor() {},
+        async setNextCursor(cursor?: string) {
+          nextCursor = cursor;
+        },
       },
       apiClient: {
         syncMessages,
@@ -89,6 +135,18 @@ describe("WechatKfRelay client package", () => {
           errmsg: "ok",
           msgid: "out-1",
         }),
+        listAccounts: vi.fn().mockResolvedValue([
+          {
+            open_kfid: "wk-1",
+            name: "Primary",
+            avatar: "https://example.com/a.png",
+          },
+          {
+            open_kfid: "wk-2",
+            name: "Secondary",
+            avatar: "https://example.com/b.png",
+          },
+        ]),
         sendMessageOnEvent,
       },
     });
@@ -114,18 +172,81 @@ describe("WechatKfRelay client package", () => {
       ws_path: "/ws",
     });
     expect(snapshotMessage).toEqual({
+      subscribed_open_kfid: undefined,
+      kf_accounts: [
+        {
+          open_kfid: "wk-1",
+          name: "Primary",
+          avatar: "https://example.com/a.png",
+        },
+        {
+          open_kfid: "wk-2",
+          name: "Secondary",
+          avatar: "https://example.com/b.png",
+        },
+      ],
       next_cursor: undefined,
       recent_messages: [],
     });
 
-    const enterSession = once(client, "wechat.enter_session");
-    const wechatMessage = once(client, "wechat.message");
     const syncResult = once(client, "sync_now.result");
     client.syncNow("sync-token");
 
+    const [receivedSyncResult] = await syncResult;
+
+    expect(receivedSyncResult).toEqual({
+      synced_count: 2,
+      next_cursor: "cursor-2",
+    });
+    await expectNoEvent(client, "wechat.message");
+    await expectNoEvent(client, "wechat.enter_session");
+
+    const subscribed = once(client, "subscribed");
+    const subscribedSnapshot = once(client, "snapshot");
+    client.subscribeTo("wk-1");
+
+    const [subscribedMessage] = await subscribed;
+    const [scopedSnapshot] = await subscribedSnapshot;
+
+    expect(subscribedMessage).toEqual({
+      open_kfid: "wk-1",
+    });
+    expect(scopedSnapshot).toEqual({
+      next_cursor: "cursor-2",
+      subscribed_open_kfid: "wk-1",
+      kf_accounts: [
+        {
+          open_kfid: "wk-1",
+          name: "Primary",
+          avatar: "https://example.com/a.png",
+        },
+        {
+          open_kfid: "wk-2",
+          name: "Secondary",
+          avatar: "https://example.com/b.png",
+        },
+      ],
+      recent_messages: [
+        expect.objectContaining({
+          message_id: "msg-1",
+          open_kfid: "wk-1",
+        }),
+      ],
+    });
+
+    const receivedMessageIds: string[] = [];
+    client.on("wechat.message", (message) => {
+      receivedMessageIds.push(message.message_id);
+    });
+
+    const enterSession = once(client, "wechat.enter_session");
+    const wechatMessage = once(client, "wechat.message");
+    const secondSyncResult = once(client, "sync_now.result");
+    client.syncNow("sync-token-2");
+
     const [receivedEnterSession] = await enterSession;
     const [receivedWechatMessage] = await wechatMessage;
-    const [receivedSyncResult] = await syncResult;
+    const [receivedSecondSyncResult] = await secondSyncResult;
 
     expect(receivedEnterSession).toMatchObject({
       event_type: "enter_session",
@@ -134,14 +255,15 @@ describe("WechatKfRelay client package", () => {
       welcome_code: "welcome-1",
     });
     expect(receivedWechatMessage).toMatchObject({
-      message_id: "msg-1",
+      message_id: "msg-2",
       open_kfid: "wk-1",
       external_userid: "wm-1",
     });
-    expect(receivedSyncResult).toEqual({
-      synced_count: 2,
-      next_cursor: "cursor-2",
+    expect(receivedSecondSyncResult).toEqual({
+      synced_count: 3,
+      next_cursor: "cursor-3",
     });
+    expect(receivedMessageIds).toEqual(["msg-2"]);
 
     const outboundSent = once(client, "wechat.outbound.sent");
     const sendTextResult = once(client, "send_text.result");
@@ -172,6 +294,17 @@ describe("WechatKfRelay client package", () => {
       msgid: "out-1",
     });
 
+    const sendTextError = once(client, "relay.error");
+    client.sendText({
+      external_userid: "wm-1",
+      open_kfid: "wk-2",
+      content: "wrong kf",
+    });
+
+    const [sendTextErrorMessage] = await sendTextError;
+
+    expect(sendTextErrorMessage.error).toContain("subscribed open_kfid");
+
     const messageOnEventResult = once(client, "message_on_event.result");
     client.messageOnEvent({
       code: "welcome-1",
@@ -194,3 +327,24 @@ describe("WechatKfRelay client package", () => {
     client.disconnect();
   });
 });
+
+async function expectNoEvent(
+  client: WechatKfRelayClient,
+  eventName: keyof import("../src/client/index.js").RelayClientEventMap,
+  timeoutMs = 100,
+) {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      client.off(eventName, onEvent as never);
+      resolve();
+    }, timeoutMs);
+
+    const onEvent = () => {
+      clearTimeout(timer);
+      client.off(eventName, onEvent as never);
+      reject(new Error(`Unexpected ${String(eventName)} event`));
+    };
+
+    client.on(eventName, onEvent as never);
+  });
+}

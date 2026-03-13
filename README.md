@@ -13,8 +13,10 @@
 
 - 校验并解密微信客服回调
 - 收到回调后调用 `kf/sync_msg` 拉取真实消息
+- 启动时调用 `kf/account/list` 拉取全部客服账号
 - 通过 `kf/send_msg` 发送文本消息
 - 通过 WebSocket 向下游广播微信消息和状态事件
+- WebSocket 客户端必须先订阅指定 `kf_id`，之后只会收到该账号的消息，并且只能以该账号发消息
 - 提供类型安全的 Node.js 客户端 `wechat-kf-relay/client`
 - 支持可选 `echo test` 模式
 - 支持 `server_key` 作为本地管理接口和 WebSocket 的访问门禁
@@ -108,8 +110,21 @@ client.on("authenticated", (payload) => {
   console.log("authenticated", payload.client_id);
 });
 
+client.on("snapshot", (snapshot) => {
+  const primaryKf = snapshot.kf_accounts[0];
+  if (!primaryKf) {
+    return;
+  }
+
+  client.subscribeTo(primaryKf.open_kfid);
+});
+
+client.on("subscribed", (payload) => {
+  console.log("subscribed", payload.open_kfid);
+});
+
 client.on("wechat.message", (message) => {
-  console.log(message.text?.content);
+  console.log(message.open_kfid, message.text?.content);
 });
 
 client.on("wechat.enter_session", (event) => {
@@ -135,6 +150,7 @@ client.syncNow();
 
 - `authenticated`
 - `snapshot`
+- `subscribed`
 - `wechat.message`
 - `wechat.enter_session`
 - `wechat.sync.complete`
@@ -154,8 +170,17 @@ client.syncNow();
 - `client.ping()`
 - `client.getSnapshot()`
 - `client.syncNow(token?)`
+- `client.subscribeTo(openKfId)`
 - `client.sendText({ external_userid, open_kfid, content, msgid? })`
 - `client.messageOnEvent({ code, content, msgid? })`
+
+说明：
+
+- `snapshot.kf_accounts` 会返回当前企业下全部可订阅的客服账号
+- `snapshot.subscribed_open_kfid` 表示这个 WebSocket 当前订阅的账号；刚连上时为空
+- 在调用 `subscribeTo(openKfId)` 之前，客户端不会收到任何账号级消息或事件
+- `sendText` 里的 `open_kfid` 必须与当前订阅一致，否则服务端会拒绝
+- `messageOnEvent` 只能回复当前订阅账号收到的 `welcome_code`
 
 ## 环境变量
 
@@ -272,6 +297,7 @@ curl -X POST http://127.0.0.1:3000/api/wechat/sync \
 
 - `authenticated`
 - `snapshot`
+- `subscribed`
 - `pong`
 - `wechat.message`
 - `wechat.enter_session`
@@ -284,6 +310,7 @@ curl -X POST http://127.0.0.1:3000/api/wechat/sync \
 
 - `ping`
 - `get_snapshot`
+- `subscribe`
 - `sync_now`
 - `send_text`
 - `message_on_event`
@@ -312,3 +339,4 @@ pnpm pack --dry-run
 - 回调配置：[开发指引 / 回调配置](https://kf.weixin.qq.com/api/doc/path/93304#%E5%9B%9E%E8%B0%83%E9%85%8D%E7%BD%AE)
 - 接收消息和事件：[接收消息和事件](https://kf.weixin.qq.com/api/doc/path/94745)
 - 发送消息：[发送消息](https://kf.weixin.qq.com/api/doc/path/94744)
+- 获取客服账号列表：[获取客服账号列表](https://kf.weixin.qq.com/api/doc/path/94746)
