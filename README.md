@@ -125,6 +125,18 @@ client.syncNow();
 - `relay.error`
 - `socket.error`
 
+客户端实例提供这些方法：
+
+- `client.on(event, listener)`
+- `client.once(event, listener)`
+- `client.off(event, listener)`
+- `client.connect()`
+- `client.disconnect(code?, reason?)`
+- `client.ping()`
+- `client.getSnapshot()`
+- `client.syncNow(token?)`
+- `client.sendText({ external_userid, open_kfid, content, msgid? })`
+
 ## 环境变量
 
 ```env
@@ -243,28 +255,6 @@ ECHO_TEST_PREFIX=[echo]
 ```
 
 开启后收到文本消息时，relay 会自动调用 `kf/send_msg` 原样回发。
-
-## 发布到 npm
-
-仓库现在采用“正常 CI + tag 发布”两段式流程：
-
-- push 到 `main` 或发起 PR 时，`.github/workflows/ci.yml` 会跑测试、构建、`pnpm pack --dry-run`
-- 真正发包时，更新 `package.json` 里的版本号，提交后打一个同版本 tag，例如 `v0.2.0`
-- push 这个 tag 后，`.github/workflows/publish.yml` 会再次校验包内容，然后通过 npm trusted publishing 发布到 npm
-- 发布工作流会校验 tag 版本和 `package.json` 版本必须一致
-
-一个常见发布流程是：
-
-```bash
-git checkout main
-pnpm test
-pnpm build
-git commit -am "chore: release v0.2.0"
-git tag v0.2.0
-git push origin main --follow-tags
-```
-
-完成首次发布并配置 trusted publisher 后，不再需要在 GitHub 仓库里保存 `NPM_TOKEN`。
 
 ## 本地验证命令
 
