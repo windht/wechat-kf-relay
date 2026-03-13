@@ -246,18 +246,29 @@ ECHO_TEST_PREFIX=[echo]
 
 ## 发布到 npm
 
-仓库已经接入 Changesets + GitHub Actions 的 release workflow：
+仓库现在采用“正常 CI + tag 发布”两段式流程：
 
-- 开发时执行 `pnpm changeset` 生成版本变更说明
-- push 到 `main` 后，`.github/workflows/release.yml` 会跑测试、构建、`pnpm pack --dry-run`
-- 如果存在未发布的 changeset，workflow 会自动创建或更新 release PR
-- release PR 合并后，workflow 会自动发布到 npm
+- push 到 `main` 或发起 PR 时，`.github/workflows/ci.yml` 会跑测试、构建、`pnpm pack --dry-run`
+- 真正发包时，更新 `package.json` 里的版本号，提交后打一个同版本 tag，例如 `v0.2.0`
+- push 这个 tag 后，`.github/workflows/publish.yml` 会再次校验包内容，然后发布到 npm
+- 发布工作流会校验 tag 版本和 `package.json` 版本必须一致
 
 需要在 GitHub 仓库里配置：
 
 - `NPM_TOKEN`
 
-这套流程是 release-workflow 驱动，不需要手工维护发布 tag。
+一个常见发布流程是：
+
+```bash
+git checkout main
+pnpm test
+pnpm build
+git commit -am "chore: release v0.2.0"
+git tag v0.2.0
+git push origin main --follow-tags
+```
+
+不需要把 npm token 提供到聊天里，只需要放到 GitHub Actions 的 repo secret。
 
 ## 本地验证命令
 
